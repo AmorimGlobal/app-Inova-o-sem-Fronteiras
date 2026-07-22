@@ -441,7 +441,63 @@
       novos: "225465",    // Novos Horizontes
       rede: "225467",     // Ponte de Negócios
     },
+
+    // Campo do formulário -> CÓDIGO do campo no card (fixados a partir do seu Bitrix).
+    trackFieldCodes: {
+      processo: "ufCrm13_1784753505246",     // Processo afetado
+      problema: "ufCrm13_1784753382989",     // Problema / Oportunidade
+      solucao: "ufCrm13_1784753394281",      // Solução proposta
+      beneficio: "ufCrm13_1784753531296",    // Benefício esperado
+      beneficiario: "ufCrm13_1784753560181", // Quem se beneficia
+      esforco: "ufCrm13_1784753571457",      // Estimativa de esforço
+      impacto: "ufCrm13_1784753576532",      // Impacto / retorno esperado
+      empresa: "ufCrm13_1784753583031",      // Empresa indicada
+      valor: "ufCrm13_1784753593610",        // Tipo de valor potencial
+      natureza: "ufCrm13_1784753612269",     // Natureza do contato
+      autorizacao: "ufCrm13_1784753617001",  // Autorização da empresa
+    },
+
+    // Reserva: caso um código mude, o app também acha o campo pelo nome.
+    trackFieldTitles: {
+      processo: "Processo afetado",
+      problema: "Problema / Oportunidade",
+      solucao: "Solução proposta",
+      beneficio: "Benefício esperado",
+      beneficiario: "Quem se beneficia",
+      esforco: "Estimativa de esforço",
+      impacto: "Impacto / retorno esperado",
+      empresa: "Empresa indicada",
+      valor: "Tipo de valor potencial",
+      natureza: "Natureza do contato",
+      autorizacao: "Autorização da empresa",
+    },
   };
+
+  // Preenchido em tempo de execução: nome-do-campo(normalizado) -> código ufCrm...
+  var FIELD_CODE_BY_TITLE = {};
+
+  function normTitle(t) {
+    return String(t || "").trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  // Lê a lista de campos do Processo Inteligente e monta o mapa nome->código.
+  function loadBitrixFields() {
+    return new Promise(function (resolve) {
+      if (!window.BX24) { resolve(); return; }
+      window.BX24.init(function () {
+        window.BX24.callMethod("crm.item.fields", { entityTypeId: CONFIG.entityTypeId }, function (res) {
+          if (!res.error()) {
+            var flds = (res.data() && res.data().fields) || {};
+            Object.keys(flds).forEach(function (code) {
+              var titulo = flds[code] && flds[code].title;
+              if (titulo) FIELD_CODE_BY_TITLE[normTitle(titulo)] = code;
+            });
+          }
+          resolve();
+        });
+      });
+    });
+  }
 
   var LINHA_NOME = { melhoria: "Melhoria Incremental", novos: "Novos Horizontes", rede: "Ponte de Negócios" };
 
@@ -479,6 +535,19 @@
       fields[CONFIG.f_solicitante] = record.autorNome || "";
       fields[CONFIG.f_categoria] = CONFIG.categoriaEnum[record.linha] || "";
       fields[CONFIG.f_motivo] = montarDetalhes(record);
+
+      // Cada resposta do formulário no seu campo próprio (achado pelo nome).
+      // Se um campo não existir no card, a resposta continua salva no "Motivo".
+      var dados = record.dados || {};
+      Object.keys(dados).forEach(function (chave) {
+        if (chave === "email") return; // já vai no campo E-mail
+        var codigo = (CONFIG.trackFieldCodes && CONFIG.trackFieldCodes[chave])
+          || FIELD_CODE_BY_TITLE[normTitle(CONFIG.trackFieldTitles[chave] || "")];
+        var valor = dados[chave];
+        if (codigo && valor !== undefined && valor !== null && String(valor).trim() !== "") {
+          fields[codigo] = valor;
+        }
+      });
 
       window.BX24.callMethod(
         "crm.item.add",
@@ -1137,6 +1206,7 @@
     state.submissions = subs; state.pautas = pts;
 
     var hasBitrix = await loadBitrixScript();
+    if (hasBitrix) { await loadBitrixFields(); }
     var perfil = hasBitrix ? await identifyViaBitrix() : null;
     if (!perfil) {
       perfil = await DATA_STORE.getProfile();
