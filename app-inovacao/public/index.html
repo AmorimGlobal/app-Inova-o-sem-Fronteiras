@@ -81,6 +81,12 @@
     font-size: 13.5px; font-family: inherit; color: var(--ink); background: #fff; outline: none;
   }
   textarea.input { resize: vertical; min-height: 84px; }
+  select.input {
+    -webkit-appearance: none; -moz-appearance: none; appearance: none; cursor: pointer;
+    padding-right: 36px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%236b7280' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 13px center; background-size: 12px 8px;
+  }
   .choice-row { display: flex; gap: 10px; }
   .choice {
     display: flex; align-items: flex-start; gap: 9px; padding: 12px 14px; border: 1.5px solid var(--border);
@@ -534,7 +540,7 @@
       fields[CONFIG.f_email] = (record.dados && record.dados.email) || record.autorEmail || "";
       fields[CONFIG.f_solicitante] = record.autorNome || "";
       fields[CONFIG.f_categoria] = CONFIG.categoriaEnum[record.linha] || "";
-      fields[CONFIG.f_motivo] = montarDetalhes(record);
+      // Motivo (longo) não é mais preenchido — cada resposta vai no seu campo próprio.
 
       // Cada resposta do formulário no seu campo próprio (achado pelo nome).
       // Se um campo não existir no card, a resposta continua salva no "Motivo".
@@ -1073,10 +1079,7 @@
       if (document.getElementById("form-rede")) {
         document.querySelectorAll('#form-rede [data-field]').forEach(function (el) {
           el.addEventListener("input", function () { updateProgress("rede", REQ_REDE); });
-          el.addEventListener("change", function () {
-            updateProgress("rede", REQ_REDE);
-            if (el.dataset.field === "autorizacao") render();
-          });
+          el.addEventListener("change", function () { updateProgress("rede", REQ_REDE); });
         });
       }
     }
