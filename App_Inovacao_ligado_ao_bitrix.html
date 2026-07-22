@@ -351,6 +351,9 @@
       if (!window.BX24) { resolve(null); return; }
       try {
         window.BX24.init(function () {
+          // Avisa o Bitrix que o app carregou/instalou (senão a tela fica em branco no primeiro acesso)
+          try { if (window.BX24.installFinish) window.BX24.installFinish(); } catch (e) {}
+          try { if (window.BX24.fitWindow) window.BX24.fitWindow(); } catch (e) {}
           window.BX24.callMethod("user.current", {}, function (result) {
             if (result.error()) { resolve(null); return; }
             var u = result.data();
