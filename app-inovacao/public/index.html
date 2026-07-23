@@ -398,6 +398,9 @@
     minhas: { busca: "", statusFiltro: "todos", expandido: null },
     pautasUI: { showForm: false, destino: "Toda a empresa", verTodas: false, busca: "", enviando: false },
     mural: { periodo: "anual", setor: "Todos os setores" },
+    // Permissão para publicar pautas (quem pode é definido no painel de admin)
+    perm: { myUserId: null, isAdmin: false, canPauta: false, people: [] },
+    pautaAdmin: { open: false, saving: false, people: [] },
   };
 
   function getInnovators() {
@@ -440,6 +443,13 @@
     f_solicitante: "ufCrm13_1757251068692", // Solicitado por:
     f_categoria: "ufCrm13_1784744093102",   // Categoria (lista)
     f_motivo: "ufCrm13_1757251169",          // Motivo da solicitação (longo)
+
+    // --- PAUTAS DAS LIDERANÇAS ---
+    pautaFunilId: 65,                 // funil onde as pautas caem (mesmo das ideias; troque se criar um separado)
+    pautaCategoriaEnum: "225493",     // opção "Pauta das lideranças" na lista Categoria
+    f_pauta_descricao: "ufCrm13_1784827431334",   // Descrição da pauta
+    f_pauta_direcionamento: "ufCrm13_1784827394344", // Direcionamento
+    f_pauta_setor: "ufCrm13_1784827403264",       // Setor de destino
 
     // trilha do app -> ID do item na lista "Categoria"
     categoriaEnum: {
@@ -506,6 +516,46 @@
   }
 
   var LINHA_NOME = { melhoria: "Melhoria Incremental", novos: "Novos Horizontes", rede: "Ponte de Negócios" };
+
+  // ---- Permissão de PAUTAS (espelha o padrão do app de comissões) ----
+  // A lista de autorizados fica em BX24.appOption (compartilhada, sem mexer em código).
+  var PAUTA_PERM_KEY = "inovacao_pautas_perm";
+
+  function loadPautaPerms() {
+    return new Promise(function (resolve) {
+      if (!window.BX24) {
+        // Fora do Bitrix (teste no navegador): libera para visualizar o formulário.
+        state.perm = { myUserId: null, isAdmin: true, canPauta: true, people: [] };
+        resolve();
+        return;
+      }
+      window.BX24.init(function () {
+        window.BX24.callMethod("profile", {}, function (pr) {
+          var myId = pr.error() ? null : String(pr.data().ID);
+          window.BX24.callMethod("user.admin", {}, function (ar) {
+            var isAdmin = !ar.error() && ar.data() === true;
+            var cfg = window.BX24.appOption.get(PAUTA_PERM_KEY);
+            var people = (cfg && Array.isArray(cfg.people)) ? cfg.people : [];
+            var autorizado = people.some(function (p) { return String(p.id) === myId; });
+            state.perm = { myUserId: myId, isAdmin: isAdmin, canPauta: isAdmin || autorizado, people: people };
+            resolve();
+          });
+        });
+      });
+    });
+  }
+
+  function savePautaPerms(people) {
+    return new Promise(function (resolve) {
+      if (!window.BX24) { resolve(false); return; }
+      window.BX24.appOption.set(PAUTA_PERM_KEY, { people: people }, function () {
+        state.perm.people = people;
+        var myId = state.perm.myUserId;
+        state.perm.canPauta = state.perm.isAdmin || people.some(function (p) { return String(p.id) === myId; });
+        resolve(true);
+      });
+    });
+  }
 
   // Monta o texto do campo "Motivo da solicitação (longo)" a partir das respostas do formulário.
   function montarDetalhes(record) {
@@ -579,11 +629,34 @@
     state.submissions = next;
     MEMORIA.submissoes = next;
   }
+  // Cria o card da pauta no funil (mesmo Processo Inteligente das ideias).
+  function bitrixCreatePauta(record) {
+    return new Promise(function (resolve) {
+      if (!window.BX24) { resolve(false); return; }
+      var texto = record.titulo || "";
+      var tituloCard = "Pauta: " + (texto.length > 80 ? texto.slice(0, 80) + "…" : (texto || record.liderNome || "sem título"));
+      var fields = {};
+      fields.title = tituloCard;
+      fields.categoryId = CONFIG.pautaFunilId;
+      fields[CONFIG.f_categoria] = CONFIG.pautaCategoriaEnum;
+      fields[CONFIG.f_pauta_descricao] = texto;
+      fields[CONFIG.f_pauta_direcionamento] = record.destino || "";
+      fields[CONFIG.f_pauta_setor] = record.area || "";
+      fields[CONFIG.f_solicitante] = record.liderNome || "";
+      fields[CONFIG.f_email] = record.liderEmail || "";
+      window.BX24.callMethod("crm.item.add", { entityTypeId: CONFIG.entityTypeId, fields: fields }, function (res) {
+        if (res.error()) { console.error("Erro ao criar pauta (crm.item.add):", res.error()); resolve(false); }
+        else { resolve(true); }
+      });
+    });
+  }
+
   async function addPauta(record) {
+    await bitrixCreatePauta(record);
     var current = await DATA_STORE.getPautas();
     var next = [record].concat(current);
     state.pautas = next;
-    await DATA_STORE.savePautas(next);
+    MEMORIA.pautas = next;
   }
   async function toggleInteresse(id) {
     if (!state.profile) return;
@@ -978,7 +1051,7 @@
     });
     var ocultas = state.pautas.length - porArea.length;
 
-    var formHtml = ui.showForm ? (
+    var formHtml = (ui.showForm && state.perm.canPauta) ? (
       '<div class="card" data-track-dirty id="form-pauta">' +
         fieldHtml("pauta-titulo", "Qual gap ou problema você quer que o time explore?", { form: "pauta", field: "titulo", type: "textarea", placeholder: "Descreva a oportunidade de melhoria que você quer colocar em pauta" }) +
         '<div class="field"><label>Direcionar para</label><div class="choice-row">' +
@@ -1032,11 +1105,48 @@
       }).join("") + '</div>';
     }
 
+    // Botões do cabeçalho conforme permissão
+    var botoes = "";
+    if (profile && state.perm.canPauta) {
+      botoes += '<button class="btn-primary" data-action="toggle-pauta-form">📣 ' + (ui.showForm ? "Cancelar" : "Nova pauta") + '</button>';
+    }
+    if (state.perm.isAdmin) {
+      botoes += '<button class="btn-link" data-action="pauta-open-admin" style="margin-left:10px;">⚙️ Autorizações</button>';
+    }
+
+    // Aviso para quem não pode publicar
+    var avisoHtml = (profile && !state.perm.canPauta)
+      ? '<div class="card" style="background:#f5f7fb;border-style:dashed;color:var(--muted);font-size:13px;">🔒 A publicação de pautas é restrita às lideranças autorizadas. Você pode acompanhar e demonstrar interesse nas pautas abaixo.</div>'
+      : "";
+
+    // Painel de admin (definir quem pode publicar) — só para admin do Bitrix
+    var adminHtml = "";
+    if (state.perm.isAdmin && state.pautaAdmin.open) {
+      var pessoas = state.pautaAdmin.people || [];
+      var listaPessoas = pessoas.length
+        ? '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;">' + pessoas.map(function (p) {
+            return '<span class="tag" style="background:#e8edff;color:#0044FF;">' + esc(p.name || ("ID " + p.id)) +
+              ' <b data-action="pauta-remove-person" data-id="' + esc(String(p.id)) + '" style="cursor:pointer;margin-left:4px;">✕</b></span>';
+          }).join("") + '</div>'
+        : '<div style="font-size:12.5px;color:var(--muted);margin:12px 0;">Ninguém autorizado ainda. Todo admin do Bitrix já pode publicar.</div>';
+
+      adminHtml = '<div class="card" style="border:1.5px solid #0044FF;">' +
+        '<div style="font-weight:700;color:var(--navy);margin-bottom:4px;">Quem pode publicar pautas</div>' +
+        '<div style="font-size:12.5px;color:var(--muted);">Selecione as lideranças autorizadas. Admins do Bitrix têm acesso automaticamente.</div>' +
+        listaPessoas +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;">' +
+          '<button class="btn-primary" data-action="pauta-pick-users">👤 Selecionar pessoas</button>' +
+          '<button class="btn-primary" data-action="pauta-save-perms"' + (state.pautaAdmin.saving ? " disabled" : "") + '>' + (state.pautaAdmin.saving ? "Salvando..." : "Salvar") + '</button>' +
+          '<button class="btn-link" data-action="pauta-close-admin">Fechar</button>' +
+        '</div>' +
+      '</div>';
+    }
+
     return '<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:14px;margin-bottom:22px;">' +
         '<div><div class="page-title">Pautas das lideranças</div><div class="page-sub">Espaço para líderes pedirem ideias ou projetos de melhoria — para o time ou para toda a empresa.</div></div>' +
-        (profile ? ('<button class="btn-primary" data-action="toggle-pauta-form">📣 ' + (ui.showForm ? "Cancelar" : "Nova pauta") + '</button>') : "") +
+        '<div>' + botoes + '</div>' +
       '</div>' +
-      formHtml + filtrosHtml + listaHtml;
+      adminHtml + avisoHtml + formHtml + filtrosHtml + listaHtml;
   }
 
   /* ==================================================================================
@@ -1145,6 +1255,33 @@
     if (action === "toggle-detalhe") { state.minhas.expandido = state.minhas.expandido === el.dataset.protocol ? null : el.dataset.protocol; render(); return; }
     if (action === "toggle-interesse") { toggleInteresse(el.dataset.id); return; }
     if (action === "toggle-pauta-form") { state.pautasUI.showForm = !state.pautasUI.showForm; render(); return; }
+    if (action === "pauta-open-admin") { state.pautaAdmin.open = true; state.pautaAdmin.people = (state.perm.people || []).slice(); render(); return; }
+    if (action === "pauta-close-admin") { state.pautaAdmin.open = false; render(); return; }
+    if (action === "pauta-remove-person") {
+      state.pautaAdmin.people = (state.pautaAdmin.people || []).filter(function (p) { return String(p.id) !== String(el.dataset.id); });
+      render(); return;
+    }
+    if (action === "pauta-pick-users") {
+      if (window.BX24 && BX24.selectUsers) {
+        BX24.selectUsers(function (users) {
+          (users || []).forEach(function (u) {
+            var id = String(u.id);
+            if (!state.pautaAdmin.people.some(function (p) { return String(p.id) === id; })) {
+              state.pautaAdmin.people.push({ id: id, name: u.name || u.sub || ("ID " + id) });
+            }
+          });
+          render();
+        });
+      }
+      return;
+    }
+    if (action === "pauta-save-perms") {
+      state.pautaAdmin.saving = true; render();
+      savePautaPerms(state.pautaAdmin.people || []).then(function () {
+        state.pautaAdmin.saving = false; state.pautaAdmin.open = false; render();
+      });
+      return;
+    }
     if (action === "pautas-ver-todas") { state.pautasUI.verTodas = !state.pautasUI.verTodas; render(); return; }
     if (action === "submit-form") { handleSubmitForm(el.dataset.flow); return; }
     if (action === "reset-form") { var flow = PROTOCOL_TO_FLOW[el.dataset.flow] || el.dataset.flow; state.enviar.done[flow] = null; render(); return; }
@@ -1171,6 +1308,7 @@
 
   async function handleSubmitPauta() {
     if (!state.profile || state.pautasUI.enviando) return;
+    if (!state.perm.canPauta) return; // trava de segurança
     var el = document.getElementById("form-pauta");
     var titulo = el.querySelector('[data-field="titulo"]').value;
     var areaInput = el.querySelector('[data-field="area"]');
@@ -1209,7 +1347,8 @@
     state.submissions = subs; state.pautas = pts;
 
     var hasBitrix = await loadBitrixScript();
-    if (hasBitrix) { await loadBitrixFields(); }
+    if (hasBitrix) { await loadBitrixFields(); await loadPautaPerms(); }
+    else { state.perm = { myUserId: null, isAdmin: true, canPauta: true, people: [] }; }
     var perfil = hasBitrix ? await identifyViaBitrix() : null;
     if (!perfil) {
       perfil = await DATA_STORE.getProfile();
