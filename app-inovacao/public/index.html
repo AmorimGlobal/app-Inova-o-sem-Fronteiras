@@ -401,6 +401,7 @@
     // Permissão para publicar pautas (quem pode é definido no painel de admin)
     perm: { myUserId: null, isAdmin: false, canPauta: false, people: [] },
     pautaAdmin: { open: false, saving: false, people: [] },
+    stageNames: [],
   };
 
   function getInnovators() {
@@ -416,7 +417,9 @@
   }
   function getMinhasSubmissoes() {
     if (!state.profile) return [];
+    var myId = state.perm && state.perm.myUserId ? String(state.perm.myUserId) : null;
     return state.submissions.filter(function (s) {
+      if (myId && s.autorId) return String(s.autorId) === myId;
       return (s.autorEmail || "").toLowerCase() === (state.profile.email || "").toLowerCase();
     });
   }
@@ -557,6 +560,114 @@
     });
   }
 
+  /* ==================================================================================
+     LEITURA PERSISTENTE DO BITRIX (Painel, Minhas ideias e Pautas)
+     ================================================================================== */
+  var CAT_TO_LINHA = { "225463": "melhoria", "225465": "novos", "225467": "rede" };
+  var STAGE_MAP = {}; // stageId -> nome da etapa (ex.: "Recebida", "Em análise", "Aprovada", "Recusada")
+
+  // Cor do selo de status a partir do NOME da etapa (resiliente a qualquer nomenclatura)
+  function statusStyle(name) {
+    var n = (name || "").toLowerCase();
+    if (n.indexOf("recus") >= 0 || n.indexOf("reprov") >= 0 || n.indexOf("não aprov") >= 0 || n.indexOf("nao aprov") >= 0) return { bg: "#fdeaea", fg: "#d0263a" };
+    if (n.indexOf("aprov") >= 0) return { bg: "#e7fbf0", fg: "#007a36" };
+    if (n.indexOf("anális") >= 0 || n.indexOf("analis") >= 0) return { bg: "#f1ecfb", fg: "#6a3fc4" };
+    if (n.indexOf("receb") >= 0) return { bg: "#e8edff", fg: "#0044FF" };
+    if (n.indexOf("desenvolv") >= 0) return { bg: "#fdeee0", fg: "#c05e0f" };
+    if (n.indexOf("conclu") >= 0) return { bg: "#e8edff", fg: "#0044FF" };
+    return { bg: "#eef0f4", fg: "#6b7280" };
+  }
+
+  // Carrega os nomes das etapas do funil (para exibir e ordenar em Minhas ideias)
+  function loadStages() {
+    return new Promise(function (resolve) {
+      if (!window.BX24) { resolve(); return; }
+      window.BX24.init(function () {
+        window.BX24.callMethod("crm.status.list", { filter: { ENTITY_ID: "DYNAMIC_" + CONFIG.entityTypeId + "_STAGE_" + CONFIG.pautaFunilId } }, function (res) {
+          if (!res.error()) {
+            var nomes = [];
+            (res.data() || []).forEach(function (s) {
+              STAGE_MAP[s.STATUS_ID] = s.NAME;
+              if (nomes.indexOf(s.NAME) < 0) nomes.push(s.NAME);
+            });
+            if (nomes.length) state.stageNames = nomes;
+          }
+          resolve();
+        });
+      });
+    });
+  }
+
+  // Lista todos os cards do funil (ideias + pautas)
+  function bitrixListItems() {
+    return new Promise(function (resolve) {
+      if (!window.BX24) { resolve([]); return; }
+      window.BX24.init(function () {
+        window.BX24.callMethod("crm.item.list", {
+          entityTypeId: CONFIG.entityTypeId,
+          filter: { categoryId: CONFIG.pautaFunilId },
+          select: ["*", "ufCrm*"],
+          order: { id: "desc" },
+        }, function (res) {
+          if (res.error()) { console.error("Erro crm.item.list:", res.error()); resolve([]); return; }
+          resolve((res.data() && res.data().items) || []);
+        });
+      });
+    });
+  }
+
+  function reconstructDados(it) {
+    var d = {};
+    Object.keys(CONFIG.trackFieldCodes).forEach(function (key) {
+      var v = it[CONFIG.trackFieldCodes[key]];
+      if (v !== undefined && v !== null && String(v).trim() !== "") d[key] = v;
+    });
+    return d;
+  }
+
+  function mapItemToSubmission(it) {
+    return {
+      protocol: "#" + it.id,
+      linha: CAT_TO_LINHA[String(it[CONFIG.f_categoria])] || "melhoria",
+      titulo: it.title || "",
+      autorNome: it[CONFIG.f_solicitante] || "",
+      autorArea: "",
+      autorEmail: it[CONFIG.f_email] || "",
+      autorId: String(it.createdBy || ""),
+      autorFoto: null,
+      criadoEm: (it.createdTime || "").slice(0, 10),
+      status: STAGE_MAP[it.stageId] || "Recebida",
+      dados: reconstructDados(it),
+    };
+  }
+
+  function mapItemToPauta(it) {
+    return {
+      id: "#" + it.id,
+      titulo: it[CONFIG.f_pauta_descricao] || it.title || "",
+      destino: it[CONFIG.f_pauta_direcionamento] || "Toda a empresa",
+      area: it[CONFIG.f_pauta_setor] || "",
+      liderNome: it[CONFIG.f_solicitante] || "",
+      liderEmail: it[CONFIG.f_email] || "",
+      criadoEm: (it.createdTime || "").slice(0, 10),
+      interessados: [],
+    };
+  }
+
+  // Recarrega ideias e pautas a partir do Bitrix (fonte de verdade)
+  async function bitrixLoadAll() {
+    if (!window.BX24) { state.submissions = MEMORIA.submissoes; state.pautas = MEMORIA.pautas; return; }
+    var items = await bitrixListItems();
+    var subs = [], pts = [];
+    items.forEach(function (it) {
+      var cat = String(it[CONFIG.f_categoria]);
+      if (cat === CONFIG.pautaCategoriaEnum) pts.push(mapItemToPauta(it));
+      else if (CAT_TO_LINHA[cat]) subs.push(mapItemToSubmission(it));
+    });
+    state.submissions = subs; MEMORIA.submissoes = subs;
+    state.pautas = pts; MEMORIA.pautas = pts;
+  }
+
   // Monta o texto do campo "Motivo da solicitação (longo)" a partir das respostas do formulário.
   function montarDetalhes(record) {
     var labels = FIELD_LABELS[record.linha] || {};
@@ -621,13 +732,9 @@
   }
 
   async function addSubmission(record) {
-    // 1) Cria o card no Bitrix (fonte de verdade do fluxo/aprovação)
     await bitrixCreateCard(record);
-    // 2) Mantém uma cópia local para exibir "Minhas ideias" na sessão atual
-    var current = await DATA_STORE.getSubmissions();
-    var next = [record].concat(current);
-    state.submissions = next;
-    MEMORIA.submissoes = next;
+    if (window.BX24) { await bitrixLoadAll(); }
+    else { MEMORIA.submissoes = [record].concat(MEMORIA.submissoes); state.submissions = MEMORIA.submissoes; }
   }
   // Cria o card da pauta no funil (mesmo Processo Inteligente das ideias).
   function bitrixCreatePauta(record) {
@@ -653,10 +760,8 @@
 
   async function addPauta(record) {
     await bitrixCreatePauta(record);
-    var current = await DATA_STORE.getPautas();
-    var next = [record].concat(current);
-    state.pautas = next;
-    MEMORIA.pautas = next;
+    if (window.BX24) { await bitrixLoadAll(); }
+    else { MEMORIA.pautas = [record].concat(MEMORIA.pautas); state.pautas = MEMORIA.pautas; }
   }
   async function toggleInteresse(id) {
     if (!state.profile) return;
@@ -996,7 +1101,7 @@
         '<div style="position:relative;flex:1;min-width:200px;"><input class="input" style="padding-left:34px;" placeholder="Buscar por título" value="' + esc(state.minhas.busca) + '" data-action="minhas-busca" /></div>' +
         '<select class="input" style="width:auto;" data-action="minhas-status">' +
           '<option value="todos"' + (state.minhas.statusFiltro === "todos" ? " selected" : "") + '>Todos os status</option>' +
-          STATUS_OPTS.map(function (s) { return '<option value="' + s + '"' + (state.minhas.statusFiltro === s ? " selected" : "") + '>' + s + '</option>'; }).join("") +
+          (state.stageNames && state.stageNames.length ? state.stageNames : STATUS_OPTS).map(function (s) { return '<option value="' + s + '"' + (state.minhas.statusFiltro === s ? " selected" : "") + '>' + s + '</option>'; }).join("") +
         '</select>' +
       '</div>'
     ) : "";
@@ -1021,7 +1126,7 @@
           '<div style="cursor:pointer;" data-action="toggle-detalhe" data-protocol="' + esc(s.protocol) + '">' +
             '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">' +
               '<div><div style="font-size:14px;font-weight:800;color:var(--navy);">' + esc(s.titulo) + '</div><div style="font-size:11.5px;color:var(--muted);margin-top:2px;">Protocolo ' + esc(s.protocol) + ' · Enviado em ' + esc(s.criadoEm) + '</div></div>' +
-              '<span class="tag" style="background:' + STATUS_STYLE[s.status].bg + ';color:' + STATUS_STYLE[s.status].fg + ';">' + esc(s.status) + '</span>' +
+              '<span class="tag" style="background:' + statusStyle(s.status).bg + ';color:' + statusStyle(s.status).fg + ';">' + esc(s.status) + '</span>' +
             '</div>' +
             '<div style="display:flex;justify-content:space-between;align-items:center;">' +
               '<span class="tag" style="background:' + LINE_STYLE[s.linha].bg + ';color:' + LINE_STYLE[s.linha].fg + ';">' + LINE_STYLE[s.linha].label + '</span>' +
@@ -1058,7 +1163,9 @@
           '<label class="choice' + (ui.destino === "Meu time" ? " selected" : "") + '"><input type="radio" name="pauta-destino" value="Meu time" data-action="pauta-destino"' + (ui.destino === "Meu time" ? " checked" : "") + ' /> Meu time</label>' +
           '<label class="choice' + (ui.destino === "Toda a empresa" ? " selected" : "") + '"><input type="radio" name="pauta-destino" value="Toda a empresa" data-action="pauta-destino"' + (ui.destino === "Toda a empresa" ? " checked" : "") + ' /> Toda a empresa</label>' +
         '</div></div>' +
-        (ui.destino === "Meu time" ? fieldHtml("pauta-area", "Qual setor?", { form: "pauta", field: "area", placeholder: "Ex: Recrutamento e Seleção" }) : "") +
+        '<div id="pauta-area-wrap" style="display:' + (ui.destino === "Meu time" ? "block" : "none") + ';">' +
+          fieldHtml("pauta-area", "Qual setor?", { form: "pauta", field: "area", placeholder: "Ex: Recrutamento e Seleção" }) +
+        '</div>' +
         '<button class="btn-primary" data-action="submit-pauta"' + (ui.enviando ? " disabled" : "") + '>' + (ui.enviando ? "Publicando..." : "Publicar pauta") + '</button>' +
       '</div>'
     ) : "";
@@ -1291,7 +1398,11 @@
   document.addEventListener("change", function (e) {
     if (e.target.dataset.action === "mural-setor") { state.mural.setor = e.target.value; render(); }
     if (e.target.dataset.action === "minhas-status") { state.minhas.statusFiltro = e.target.value; render(); }
-    if (e.target.dataset.action === "pauta-destino") { state.pautasUI.destino = e.target.value; render(); }
+    if (e.target.dataset.action === "pauta-destino") {
+      state.pautasUI.destino = e.target.value;
+      var wrap = document.getElementById("pauta-area-wrap");
+      if (wrap) wrap.style.display = (e.target.value === "Meu time") ? "block" : "none";
+    }
   });
 
   document.addEventListener("input", function (e) {
@@ -1342,13 +1453,18 @@
      INICIALIZAÇÃO
      ================================================================================== */
   (async function init() {
-    var subs = await DATA_STORE.getSubmissions();
-    var pts = await DATA_STORE.getPautas();
-    state.submissions = subs; state.pautas = pts;
+    state.submissions = []; state.pautas = [];
 
     var hasBitrix = await loadBitrixScript();
-    if (hasBitrix) { await loadBitrixFields(); await loadPautaPerms(); }
-    else { state.perm = { myUserId: null, isAdmin: true, canPauta: true, people: [] }; }
+    if (hasBitrix) {
+      await loadBitrixFields();
+      await loadPautaPerms();
+      await loadStages();
+      await bitrixLoadAll();
+    } else {
+      state.perm = { myUserId: null, isAdmin: true, canPauta: true, people: [] };
+      state.submissions = MEMORIA.submissoes; state.pautas = MEMORIA.pautas;
+    }
     var perfil = hasBitrix ? await identifyViaBitrix() : null;
     if (!perfil) {
       perfil = await DATA_STORE.getProfile();
