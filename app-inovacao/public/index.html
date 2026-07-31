@@ -118,6 +118,17 @@
 
   .jump-pill { font-size: 12.5px; font-weight: 700; padding: 8px 14px; border-radius: 30px; cursor: pointer; box-shadow: 0 1px 3px rgba(0,12,51,0.06); }
 
+  /* ---------- erro ---------- */
+  .erro-box {
+    background: #fdeaea; border: 1.5px solid #f3c2c8; color: #a01827; border-radius: 10px;
+    padding: 14px 16px; font-size: 12.5px; line-height: 1.5; margin-top: 16px;
+  }
+  .erro-box b { color: #7d1120; }
+  .erro-box code {
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 11.5px;
+    background: #fff; border-radius: 5px; padding: 2px 5px; word-break: break-word;
+  }
+
   /* ---------- confirmação ---------- */
   .confirm { background: #fff; border-radius: 14px; padding: 36px; text-align: center; }
   .confirm .check-circle { width: 46px; height: 46px; border-radius: 50%; background: #e7fbf0; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
@@ -194,7 +205,7 @@
   var FIELD_LABELS = {
     melhoria: { titulo: "Título", processo: "Processo afetado", problema: "Problema atual", solucao: "Solução proposta", beneficio: "Benefício esperado" },
     novos: { titulo: "Título do projeto", problema: "Problema ou oportunidade", solucao: "Solução proposta", beneficiario: "Quem se beneficia", esforco: "Estimativa de esforço", impacto: "Impacto ou retorno esperado" },
-    rede: { empresa: "Empresa indicada", valor: "Tipo de valor potencial", natureza: "Natureza do contato", autorizacao: "Autorização da empresa" },
+    rede: { empresa: "Empresa indicada", natureza: "Natureza do contato", autorizacao: "Autorização da empresa" },
   };
   var PERIODOS = [
     { key: "mensal", label: "Mensal", dias: 30 },
@@ -394,9 +405,15 @@
     pautas: [],
     tab: "home",
     // uso interno de formulários (não precisa reatividade por tecla — lido do DOM no envio)
-    enviar: { done: { melhoria: null, novos: null, rede: null }, enviando: { melhoria: false, novos: false, rede: false } },
+    enviar: {
+      done: { melhoria: null, novos: null, rede: null },
+      enviando: { melhoria: false, novos: false, rede: false },
+      erro: { melhoria: null, novos: null, rede: null },
+    },
     minhas: { busca: "", statusFiltro: "todos", expandido: null },
-    pautasUI: { showForm: false, destino: "Toda a empresa", verTodas: false, busca: "", enviando: false },
+    pautasUI: { showForm: false, destino: "Toda a empresa", verTodas: false, busca: "", enviando: false, erro: null },
+    // Erro de LEITURA do Bitrix (crm.item.list) — normalmente falta de permissão no funil
+    loadError: null,
     mural: { periodo: "anual", setor: "Todos os setores" },
     // Permissão para publicar pautas (quem pode é definido no painel de admin)
     perm: { myUserId: null, isAdmin: false, canPauta: false, people: [] },
@@ -471,7 +488,6 @@
       esforco: "ufCrm13_1784753571457",      // Estimativa de esforço
       impacto: "ufCrm13_1784753576532",      // Impacto / retorno esperado
       empresa: "ufCrm13_1784753583031",      // Empresa indicada
-      valor: "ufCrm13_1784753593610",        // Tipo de valor potencial
       natureza: "ufCrm13_1784753612269",     // Natureza do contato
       autorizacao: "ufCrm13_1784753617001",  // Autorização da empresa
     },
@@ -486,7 +502,6 @@
       esforco: "Estimativa de esforço",
       impacto: "Impacto / retorno esperado",
       empresa: "Empresa indicada",
-      valor: "Tipo de valor potencial",
       natureza: "Natureza do contato",
       autorizacao: "Autorização da empresa",
     },
@@ -598,6 +613,18 @@
     });
   }
 
+  // Extrai um texto legível do erro devolvido pelo BX24 (o formato varia).
+  function bitrixErroTexto(err) {
+    try {
+      if (!err) return "erro desconhecido";
+      if (typeof err === "string") return err;
+      var e = (typeof err.getError === "function" ? err.getError() : err) || {};
+      return e.error_description || e.error || err.error_description || err.error || JSON.stringify(e);
+    } catch (ex) {
+      return "erro desconhecido";
+    }
+  }
+
   // Lista todos os cards do funil (ideias + pautas)
   function bitrixListItems() {
     return new Promise(function (resolve) {
@@ -609,7 +636,15 @@
           select: ["*", "ufCrm*"],
           order: { id: "desc" },
         }, function (res) {
-          if (res.error()) { console.error("Erro crm.item.list:", res.error()); resolve([]); return; }
+          if (res.error()) {
+            console.error("Erro crm.item.list:", res.error());
+            // Sem permissão de LEITURA no Processo Inteligente o mural e "Minhas ideias"
+            // ficariam vazios sem explicação — registra para avisar na tela.
+            state.loadError = bitrixErroTexto(res.error());
+            resolve([]);
+            return;
+          }
+          state.loadError = null;
           resolve((res.data() && res.data().items) || []);
         });
       });
@@ -688,11 +723,13 @@
   }
 
   // Cria o card no Bitrix. Fora do Bitrix (teste no navegador) cai para memória.
+  // Resolve { ok: true } ou { ok: false, erro: "<texto do Bitrix>" } — quem chama
+  // PRECISA olhar esse retorno; antes o erro era engolido e a tela dizia "enviada!".
   function bitrixCreateCard(record) {
     return new Promise(function (resolve) {
       if (!window.BX24) {
         console.warn("Fora do Bitrix — card não criado (modo teste).");
-        resolve(false);
+        resolve({ ok: true, memoria: true });
         return;
       }
       var fields = {};
@@ -722,9 +759,9 @@
         function (res) {
           if (res.error()) {
             console.error("Erro ao criar card (crm.item.add):", res.error());
-            resolve(false);
+            resolve({ ok: false, erro: bitrixErroTexto(res.error()) });
           } else {
-            resolve(true);
+            resolve({ ok: true });
           }
         }
       );
@@ -732,14 +769,16 @@
   }
 
   async function addSubmission(record) {
-    await bitrixCreateCard(record);
+    var r = await bitrixCreateCard(record);
+    if (!r.ok) return r;
     if (window.BX24) { await bitrixLoadAll(); }
     else { MEMORIA.submissoes = [record].concat(MEMORIA.submissoes); state.submissions = MEMORIA.submissoes; }
+    return r;
   }
   // Cria o card da pauta no funil (mesmo Processo Inteligente das ideias).
   function bitrixCreatePauta(record) {
     return new Promise(function (resolve) {
-      if (!window.BX24) { resolve(false); return; }
+      if (!window.BX24) { resolve({ ok: true, memoria: true }); return; }
       var texto = record.titulo || "";
       var tituloCard = "Pauta: " + (texto.length > 80 ? texto.slice(0, 80) + "…" : (texto || record.liderNome || "sem título"));
       var fields = {};
@@ -752,16 +791,18 @@
       fields[CONFIG.f_solicitante] = record.liderNome || "";
       fields[CONFIG.f_email] = record.liderEmail || "";
       window.BX24.callMethod("crm.item.add", { entityTypeId: CONFIG.entityTypeId, fields: fields }, function (res) {
-        if (res.error()) { console.error("Erro ao criar pauta (crm.item.add):", res.error()); resolve(false); }
-        else { resolve(true); }
+        if (res.error()) { console.error("Erro ao criar pauta (crm.item.add):", res.error()); resolve({ ok: false, erro: bitrixErroTexto(res.error()) }); }
+        else { resolve({ ok: true }); }
       });
     });
   }
 
   async function addPauta(record) {
-    await bitrixCreatePauta(record);
+    var r = await bitrixCreatePauta(record);
+    if (!r.ok) return r;
     if (window.BX24) { await bitrixLoadAll(); }
     else { MEMORIA.pautas = [record].concat(MEMORIA.pautas); state.pautas = MEMORIA.pautas; }
+    return r;
   }
   async function toggleInteresse(id) {
     if (!state.profile) return;
@@ -925,13 +966,68 @@
       '</div>'
     ) : "";
 
-    return hero +
+    return loadErrorBannerHtml() + hero +
       '<div style="margin-bottom:26px;">' +
         '<div class="page-title">Mural dos Inovadores</div>' +
         '<div class="page-sub">Pessoas que transformam desafios em soluções.</div>' +
       '</div>' +
       renderMural(innovators) +
       pautasHtml;
+  }
+
+  /* ==================================================================================
+     AVISOS DE ERRO (leitura e envio)
+     ==================================================================================
+     Sem isto, uma falha de permissão no Bitrix24 é invisível: o mural fica vazio e o
+     envio mostra "Ideia enviada!" mesmo sem ter criado card nenhum.
+     ================================================================================== */
+  function loadErrorBannerHtml() {
+    if (!state.loadError) return "";
+    return '<div class="erro-box" style="margin-top:0;margin-bottom:20px;">' +
+      '<b>Não foi possível ler as ideias do Bitrix24.</b> Por isso o Mural dos Inovadores e ' +
+      '"Minhas ideias" podem aparecer vazios, mesmo que existam cards no funil. ' +
+      'Em geral falta liberar o acesso do seu usuário ao Processo Inteligente. ' +
+      'Mensagem do Bitrix: <code>' + esc(state.loadError) + '</code>' +
+    '</div>';
+  }
+
+  function erroEnvioHtml(texto) {
+    return '<b>Não conseguimos registrar no Bitrix24 — nada foi salvo.</b> ' +
+      'O que você digitou continua no formulário; tente enviar novamente. ' +
+      'Se o erro repetir, mostre esta mensagem ao time de TI (normalmente é permissão de acesso ao funil): ' +
+      '<code>' + esc(texto || "erro desconhecido") + '</code>';
+  }
+  // Caixa renderizada junto do formulário (sobrevive a um render()).
+  function erroEnvioBoxHtml(flow) {
+    var texto = state.enviar.erro[flow];
+    return texto ? '<div class="erro-box" data-erro-envio>' + erroEnvioHtml(texto) + '</div>' : "";
+  }
+  // Caixa injetada no DOM sem render(), para não apagar o que a pessoa digitou.
+  function mostrarErroEnvio(formId, texto) {
+    var form = document.getElementById(formId);
+    if (!form) return;
+    var box = form.querySelector("[data-erro-envio]");
+    if (!box) {
+      box = document.createElement("div");
+      box.className = "erro-box";
+      box.setAttribute("data-erro-envio", "");
+      form.appendChild(box);
+    }
+    box.innerHTML = erroEnvioHtml(texto);
+    box.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+  function limparErroEnvio(formId) {
+    var form = document.getElementById(formId);
+    var box = form && form.querySelector("[data-erro-envio]");
+    if (box) box.parentNode.removeChild(box);
+  }
+  // Estado "enviando" do botão sem passar por render() (idem: preserva o formulário).
+  var SUBMIT_LABEL = { melhoria: "Enviar ideia", novos: "Enviar projeto", rede: "Enviar indicação" };
+  function setSubmitBusy(selector, busy, labelPronto, labelOcupado) {
+    var btn = document.querySelector(selector);
+    if (!btn) return;
+    btn.disabled = busy;
+    btn.textContent = busy ? labelOcupado : labelPronto;
   }
 
   /* ==================================================================================
@@ -981,7 +1077,7 @@
 
   var REQ_MELHORIA = ["titulo", "processo", "problema", "solucao", "beneficio", "email"];
   var REQ_NOVOS = ["titulo", "problema", "solucao", "beneficiario", "esforco", "impacto", "email"];
-  var REQ_REDE = ["empresa", "valor", "natureza", "autorizacao", "email"];
+  var REQ_REDE = ["empresa", "natureza", "autorizacao", "email"];
 
   function confirmHtml(protocol, texto) {
     return '<div class="confirm">' +
@@ -1008,6 +1104,7 @@
       fieldHtml("melhoria-beneficio", "Benefício esperado", { form: "melhoria", field: "beneficio", type: "textarea", placeholder: "Ex: redução de tempo, menos retrabalho, menor risco de erro" }) +
       fieldHtml("melhoria-email", "E-mail para contato", { form: "melhoria", field: "email", placeholder: "seu.email@amorimglobal.com.br", value: (state.profile && state.profile.email) || "" }) +
       '<button class="btn-primary" data-action="submit-form" data-flow="melhoria"' + (enviando ? " disabled" : "") + '>' + (enviando ? "Enviando..." : "Enviar ideia") + '</button>' +
+      erroEnvioBoxHtml("melhoria") +
     '</div>';
   }
 
@@ -1034,6 +1131,7 @@
       fieldHtml("novos-impacto", "Estimativa de impacto ou retorno esperado", { form: "novos", field: "impacto", type: "textarea", placeholder: "Estime economia, nova receita ou impacto estratégico" }) +
       fieldHtml("novos-email", "E-mail para contato", { form: "novos", field: "email", placeholder: "seu.email@amorimglobal.com.br", value: (state.profile && state.profile.email) || "" }) +
       '<button class="btn-primary" data-action="submit-form" data-flow="novos"' + (enviando ? " disabled" : "") + '>' + (enviando ? "Enviando..." : "Enviar projeto") + '</button>' +
+      erroEnvioBoxHtml("novos") +
     '</div>';
   }
 
@@ -1042,13 +1140,13 @@
     if (flowState.done.rede) return confirmHtml(flowState.done.rede, "Obrigado pela indicação! Nossa equipe vai analisar o contato, e a indicação fica válida por até 12 meses a partir do envio.");
     var enviando = flowState.enviando.rede;
     return '<div class="card" data-track-dirty style="border-left:4px solid ' + LINE_STYLE.rede.accent + ';" id="form-rede">' +
-      '<div class="progress-wrap"><div class="progress-label"><span data-progress-label>0 de 5 campos preenchidos</span><span>0%</span></div><div class="progress-track"><div class="progress-fill" data-progress-fill style="width:0%"></div></div></div>' +
+      '<div class="progress-wrap"><div class="progress-label"><span data-progress-label>0 de 4 campos preenchidos</span><span>0%</span></div><div class="progress-track"><div class="progress-fill" data-progress-fill style="width:0%"></div></div></div>' +
       fieldHtml("rede-empresa", "Empresa indicada", { form: "rede", field: "empresa", placeholder: "Nome da empresa" }) +
-      fieldHtml("rede-valor", "Tipo de valor potencial", { form: "rede", field: "valor", type: "select", options: ["Fornecedor", "Parceria comercial", "Co-marketing", "Tecnologia", "Outro"] }) +
       fieldHtml("rede-natureza", "Natureza do contato", { form: "rede", field: "natureza", type: "textarea", placeholder: "Como você conhece essa empresa e por que ela pode gerar valor comercial para a Amorim" }) +
       fieldHtml("rede-autorizacao", "A empresa indicada autoriza este contato?", { form: "rede", field: "autorizacao", type: "choice", options: [{ value: "Sim", label: "Sim, já confirmei com a empresa" }, { value: "Não", label: "Ainda não confirmei" }] }) +
       fieldHtml("rede-email", "E-mail para contato", { form: "rede", field: "email", placeholder: "seu.email@amorimglobal.com.br", value: (state.profile && state.profile.email) || "" }) +
       '<button class="btn-primary" data-action="submit-form" data-flow="rede"' + (enviando ? " disabled" : "") + '>' + (enviando ? "Enviando..." : "Enviar indicação") + '</button>' +
+      erroEnvioBoxHtml("rede") +
     '</div>';
   }
 
@@ -1137,7 +1235,8 @@
       }).join("") + '</div>';
     }
 
-    return '<div style="font-size:22px;font-weight:800;letter-spacing:-.01em;color:var(--navy);margin-bottom:4px;">Minhas ideias</div>' +
+    return loadErrorBannerHtml() +
+      '<div style="font-size:22px;font-weight:800;letter-spacing:-.01em;color:var(--navy);margin-bottom:4px;">Minhas ideias</div>' +
       '<div class="page-sub" style="margin-bottom:22px;">' + list.length + ' ideia(s) registrada(s) por você.</div>' +
       filtros + cardsHtml;
   }
@@ -1167,6 +1266,7 @@
           fieldHtml("pauta-area", "Qual setor?", { form: "pauta", field: "area", placeholder: "Ex: Recrutamento e Seleção" }) +
         '</div>' +
         '<button class="btn-primary" data-action="submit-pauta"' + (ui.enviando ? " disabled" : "") + '>' + (ui.enviando ? "Publicando..." : "Publicar pauta") + '</button>' +
+        (ui.erro ? '<div class="erro-box" data-erro-envio>' + erroEnvioHtml(ui.erro) + '</div>' : "") +
       '</div>'
     ) : "";
 
@@ -1329,16 +1429,29 @@
     if (!validar(data, req)) return;
     if (flow === "novos" && !isJanela3T()) return;
 
-    state.enviar.enviando[flow] = true; render();
+    // Sem render() aqui: os valores do formulário vivem só no DOM, e um re-render
+    // apagaria tudo que a pessoa digitou se o envio falhar.
+    state.enviar.enviando[flow] = true;
+    state.enviar.erro[flow] = null;
+    limparErroEnvio("form-" + flow);
+    setSubmitBusy('#form-' + flow + ' [data-action="submit-form"]', true, SUBMIT_LABEL[flow], "Enviando...");
 
     var protocol = genProtocol(flow);
     var titulo = flow === "melhoria" ? data.titulo : flow === "novos" ? data.titulo : data.empresa;
-    await addSubmission({
+    var r = await addSubmission({
       protocol: protocol, linha: flow, titulo: titulo,
       autorNome: state.profile.nome, autorArea: state.profile.area, autorEmail: state.profile.email, autorFoto: state.profile.foto || null,
       criadoEm: todayISO(), status: "Em análise", dados: data,
     });
     state.enviar.enviando[flow] = false;
+
+    if (!r || !r.ok) {
+      // Falhou de verdade — não mostra tela de sucesso.
+      state.enviar.erro[flow] = (r && r.erro) || "erro desconhecido";
+      setSubmitBusy('#form-' + flow + ' [data-action="submit-form"]', false, SUBMIT_LABEL[flow], "Enviando...");
+      mostrarErroEnvio("form-" + flow, state.enviar.erro[flow]);
+      return;
+    }
     state.enviar.done[flow] = protocol;
     render();
   }
@@ -1438,14 +1551,27 @@
       });
       return;
     }
-    state.pautasUI.enviando = true; render();
-    await addPauta({
+    // Idem formulários de ideia: sem render() antes do resultado, para não perder o texto.
+    state.pautasUI.enviando = true;
+    state.pautasUI.erro = null;
+    limparErroEnvio("form-pauta");
+    setSubmitBusy('#form-pauta [data-action="submit-pauta"]', true, "Publicar pauta", "Publicando...");
+
+    var r = await addPauta({
       id: "PL-" + Date.now(), titulo: titulo, destino: state.pautasUI.destino,
       area: state.pautasUI.destino === "Meu time" ? area : "",
       liderNome: state.profile.nome, liderEmail: state.profile.email,
       criadoEm: todayISO(), interessados: [],
     });
-    state.pautasUI = { showForm: false, destino: "Toda a empresa", verTodas: state.pautasUI.verTodas, busca: state.pautasUI.busca, enviando: false };
+    state.pautasUI.enviando = false;
+
+    if (!r || !r.ok) {
+      state.pautasUI.erro = (r && r.erro) || "erro desconhecido";
+      setSubmitBusy('#form-pauta [data-action="submit-pauta"]', false, "Publicar pauta", "Publicando...");
+      mostrarErroEnvio("form-pauta", state.pautasUI.erro);
+      return;
+    }
+    state.pautasUI = { showForm: false, destino: "Toda a empresa", verTodas: state.pautasUI.verTodas, busca: state.pautasUI.busca, enviando: false, erro: null };
     render();
   }
 
