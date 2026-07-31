@@ -118,6 +118,34 @@
 
   .jump-pill { font-size: 12.5px; font-weight: 700; padding: 8px 14px; border-radius: 30px; cursor: pointer; box-shadow: 0 1px 3px rgba(0,12,51,0.06); }
 
+  /* ---------- comentários das pautas ---------- */
+  .coment-wrap { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--divider); }
+  .coment-titulo {
+    font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .04em; margin-bottom: 10px;
+  }
+  .coment { display: flex; gap: 9px; margin-bottom: 12px; }
+  .coment-avatar { width: 30px; height: 30px; flex-shrink: 0; position: relative; }
+  .coment-avatar .circle {
+    width: 30px; height: 30px; border-radius: 50%; color: #fff; display: flex; align-items: center;
+    justify-content: center; font-size: 11px; font-weight: 800;
+  }
+  .coment-avatar img {
+    position: absolute; inset: 0; width: 30px; height: 30px; border-radius: 50%; object-fit: cover;
+  }
+  .coment-corpo { flex: 1; min-width: 0; }
+  .coment-meta { font-size: 11.5px; color: var(--muted); margin-bottom: 2px; }
+  .coment-meta b { color: var(--navy); }
+  .coment-texto { font-size: 13px; color: var(--ink); line-height: 1.5; word-wrap: break-word; }
+  .coment-form { display: flex; flex-direction: column; gap: 8px; }
+  .coment-form textarea { min-height: 62px; }
+  .coment-form .acoes { display: flex; justify-content: flex-end; }
+  .btn-coment {
+    background: var(--surface); border: none; color: var(--navy); font-weight: 700; font-size: 12.5px;
+    padding: 9px 18px; border-radius: 8px; cursor: pointer;
+  }
+  .btn-coment:disabled { color: #9aa0b5; cursor: not-allowed; }
+
   /* ---------- erro ---------- */
   .erro-box {
     background: #fdeaea; border: 1.5px solid #f3c2c8; color: #a01827; border-radius: 10px;
@@ -249,6 +277,8 @@
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
   function firstName(nome) { return (nome || "").split(" ")[0] || ""; }
+  // Comentários vêm com quebras de linha; escapa e preserva os parágrafos.
+  function escMultilinha(str) { return esc(str).replace(/\r?\n/g, "<br />"); }
 
   /* ==================================================================================
      CAMADA DE DADOS (DATA STORE)
@@ -414,6 +444,10 @@
     pautasUI: { showForm: false, destino: "Toda a empresa", verTodas: false, busca: "", enviando: false, erro: null },
     // Erro de LEITURA do Bitrix (crm.item.list) — normalmente falta de permissão no funil
     loadError: null,
+    // Comentários das pautas: itemId do card -> lista de comentários
+    comentarios: {},
+    comentErroLeitura: {},   // itemId -> true quando a leitura falhou (não é "sem comentários")
+    comentUI: { enviando: {} },
     mural: { periodo: "anual", setor: "Todos os setores" },
     // Permissão para publicar pautas (quem pode é definido no painel de admin)
     perm: { myUserId: null, isAdmin: false, canPauta: false, people: [] },
@@ -470,6 +504,10 @@
     f_pauta_descricao: "ufCrm13_1784827431334",   // Descrição da pauta
     f_pauta_direcionamento: "ufCrm13_1784827394344", // Direcionamento
     f_pauta_setor: "ufCrm13_1784827403264",       // Setor de destino
+
+    // Comentários das pautas usam a timeline nativa do card (nenhum campo novo no Bitrix).
+    // Precisa acompanhar o entityTypeId acima: Processo Inteligente 1046 -> DYNAMIC_1046.
+    timelineEntityType: "DYNAMIC_1046",
 
     // trilha do app -> ID do item na lista "Categoria"
     categoriaEnum: {
@@ -625,6 +663,136 @@
     }
   }
 
+  /* ----------------------------------------------------------------------------------
+     CACHE DE USUÁRIOS DO BITRIX (id -> { nome, foto })
+     ----------------------------------------------------------------------------------
+     crm.item.list devolve só o ID de quem criou o card (createdBy), sem nome nem foto.
+     Buscamos os usuários em lote (callBatch) para o mural mostrar a foto real do Bitrix
+     em vez das iniciais, e para os comentários mostrarem quem escreveu.
+     ---------------------------------------------------------------------------------- */
+  var USER_CACHE = {};
+
+  function loadUsersChunk(ids) {
+    return new Promise(function (resolve) {
+      var lote = {};
+      ids.forEach(function (id) { lote["u" + id] = ["user.get", { ID: id }]; });
+      window.BX24.callBatch(lote, function (res) {
+        ids.forEach(function (id) {
+          var r = res && res["u" + id];
+          if (!r || r.error()) return;
+          var dados = r.data();
+          var u = Array.isArray(dados) ? dados[0] : dados;
+          if (!u) return;
+          USER_CACHE[String(id)] = {
+            nome: [u.NAME, u.LAST_NAME].filter(Boolean).join(" ").trim() || u.EMAIL || "",
+            foto: u.PERSONAL_PHOTO || null,
+          };
+        });
+        resolve();
+      });
+    });
+  }
+
+  // Busca só os IDs que ainda não estão em cache, em lotes de 50 (limite do callBatch).
+  async function loadUsers(ids) {
+    if (!window.BX24) return;
+    var pendentes = [];
+    (ids || []).forEach(function (id) {
+      var k = String(id || "");
+      if (k && !USER_CACHE[k] && pendentes.indexOf(k) < 0) pendentes.push(k);
+    });
+    for (var i = 0; i < pendentes.length; i += 50) {
+      await loadUsersChunk(pendentes.slice(i, i + 50));
+    }
+  }
+
+  function userFoto(id) {
+    var u = USER_CACHE[String(id || "")];
+    return (u && u.foto) || null;
+  }
+  function userNome(id) {
+    var u = USER_CACHE[String(id || "")];
+    return (u && u.nome) || "";
+  }
+
+  /* ----------------------------------------------------------------------------------
+     COMENTÁRIOS DAS PAUTAS — timeline nativa do card
+     ----------------------------------------------------------------------------------
+     Guardar na timeline evita criar campo ou funil novo no Bitrix, e a conversa fica
+     visível também para quem abrir o card pelo CRM.
+     ---------------------------------------------------------------------------------- */
+  function loadComentariosChunk(itemIds) {
+    return new Promise(function (resolve) {
+      var lote = {};
+      itemIds.forEach(function (id) {
+        lote["c" + id] = ["crm.timeline.comment.list", {
+          filter: { ENTITY_ID: Number(id), ENTITY_TYPE: CONFIG.timelineEntityType },
+          order: { ID: "ASC" },
+        }];
+      });
+      window.BX24.callBatch(lote, function (res) {
+        var autores = [];
+        itemIds.forEach(function (id) {
+          var r = res && res["c" + id];
+          if (!r || r.error()) {
+            if (r) console.error("Erro crm.timeline.comment.list:", r.error());
+            state.comentErroLeitura[String(id)] = true;
+            return;
+          }
+          state.comentErroLeitura[String(id)] = false;
+          var dados = r.data();
+          var itens = Array.isArray(dados) ? dados : (dados && dados.items) || [];
+          state.comentarios[String(id)] = itens.map(function (c) {
+            var autorId = String(c.AUTHOR_ID || "");
+            if (autorId && autores.indexOf(autorId) < 0) autores.push(autorId);
+            return {
+              id: String(c.ID),
+              autorId: autorId,
+              texto: c.COMMENT || "",
+              criadoEm: String(c.CREATED || "").slice(0, 10),
+            };
+          });
+        });
+        loadUsers(autores).then(function () { resolve(); });
+      });
+    });
+  }
+
+  async function loadComentarios(itemIds) {
+    if (!window.BX24) return;
+    var ids = (itemIds || []).filter(Boolean).map(String);
+    for (var i = 0; i < ids.length; i += 50) {
+      await loadComentariosChunk(ids.slice(i, i + 50));
+    }
+  }
+
+  function bitrixAddComentario(itemId, texto) {
+    return new Promise(function (resolve) {
+      if (!window.BX24) {
+        // Modo teste no navegador: guarda em memória para dar pra ver o layout.
+        var lista = state.comentarios[String(itemId)] || [];
+        lista.push({ id: "local-" + lista.length, autorId: "", texto: texto, criadoEm: todayISO(), autorNomeLocal: (state.profile && state.profile.nome) || "Você" });
+        state.comentarios[String(itemId)] = lista;
+        resolve({ ok: true, memoria: true });
+        return;
+      }
+      window.BX24.callMethod("crm.timeline.comment.add", {
+        fields: {
+          ENTITY_ID: Number(itemId),
+          ENTITY_TYPE: CONFIG.timelineEntityType,
+          COMMENT: texto,
+        },
+      }, function (res) {
+        if (res.error()) {
+          console.error("Erro ao comentar (crm.timeline.comment.add):", res.error());
+          resolve({ ok: false, erro: bitrixErroTexto(res.error()) });
+        } else {
+          resolve({ ok: true });
+        }
+      });
+    });
+  }
+
   // Lista todos os cards do funil (ideias + pautas)
   function bitrixListItems() {
     return new Promise(function (resolve) {
@@ -679,6 +847,8 @@
   function mapItemToPauta(it) {
     return {
       id: "#" + it.id,
+      itemId: String(it.id),   // id cru do card, usado nas chamadas de comentário
+      autorId: String(it.createdBy || ""),
       titulo: it[CONFIG.f_pauta_descricao] || it.title || "",
       destino: it[CONFIG.f_pauta_direcionamento] || "Toda a empresa",
       area: it[CONFIG.f_pauta_setor] || "",
@@ -699,8 +869,19 @@
       if (cat === CONFIG.pautaCategoriaEnum) pts.push(mapItemToPauta(it));
       else if (CAT_TO_LINHA[cat]) subs.push(mapItemToSubmission(it));
     });
+    // Nome e foto reais de quem criou (crm.item.list só traz o ID)
+    var autores = [];
+    subs.concat(pts).forEach(function (r) { if (r.autorId) autores.push(r.autorId); });
+    await loadUsers(autores);
+    subs.forEach(function (s) {
+      s.autorFoto = userFoto(s.autorId);
+      if (!s.autorNome) s.autorNome = userNome(s.autorId);
+    });
+
     state.submissions = subs; MEMORIA.submissoes = subs;
     state.pautas = pts; MEMORIA.pautas = pts;
+
+    await loadComentarios(pts.map(function (p) { return p.itemId; }));
   }
 
   // Monta o texto do campo "Motivo da solicitação (longo)" a partir das respostas do formulário.
@@ -1244,6 +1425,46 @@
   /* ==================================================================================
      RENDER — Pautas das lideranças
      ================================================================================== */
+  // Avatar de 30px usado nos comentários (foto do Bitrix, com iniciais por baixo).
+  function avatarPequenoHtml(nome, foto) {
+    var img = foto ? '<img src="' + esc(foto) + '" alt="' + esc(nome) + '" onerror="this.remove()" />' : "";
+    return '<div class="coment-avatar">' +
+      '<div class="circle" style="background:' + avatarColor(nome) + ';">' + esc(initials(nome)) + '</div>' + img +
+    '</div>';
+  }
+
+  // Bloco de contribuições embaixo de cada pauta.
+  function comentariosHtml(p) {
+    var chave = p.itemId || p.id;   // fora do Bitrix a pauta não tem card, cai no id local
+    var lista = state.comentarios[chave] || [];
+
+    var itensHtml = lista.map(function (c) {
+      var nome = c.autorNomeLocal || userNome(c.autorId) || "Colega";
+      return '<div class="coment">' +
+        avatarPequenoHtml(nome, userFoto(c.autorId)) +
+        '<div class="coment-corpo">' +
+          '<div class="coment-meta"><b>' + esc(nome) + '</b>' + (c.criadoEm ? " · " + esc(c.criadoEm) : "") + '</div>' +
+          '<div class="coment-texto">' + escMultilinha(c.texto) + '</div>' +
+        '</div>' +
+      '</div>';
+    }).join("");
+
+    var formHtml = state.profile ? (
+      '<div class="coment-form" id="form-coment-' + esc(chave) + '">' +
+        '<textarea class="input" data-field="comentario" placeholder="Escreva sua contribuição para esta pauta"></textarea>' +
+        '<div class="acoes"><button class="btn-coment" data-action="submit-comentario" data-item="' + esc(chave) + '">Comentar</button></div>' +
+      '</div>'
+    ) : "";
+
+    return '<div class="coment-wrap">' +
+      '<div class="coment-titulo">' + (lista.length ? (lista.length + (lista.length === 1 ? " contribuição" : " contribuições")) : "Contribuições") + '</div>' +
+      (lista.length ? itensHtml : (state.comentErroLeitura[chave]
+        ? '<div class="empty" style="padding:0 0 10px;">Não foi possível carregar as contribuições desta pauta.</div>'
+        : '<div class="empty" style="padding:0 0 10px;">Ninguém comentou ainda. Seja a primeira pessoa a contribuir.</div>')) +
+      formHtml +
+    '</div>';
+  }
+
   function renderPautas() {
     var profile = state.profile;
     var ui = state.pautasUI;
@@ -1308,6 +1529,7 @@
             '<span style="font-size:11.5px;color:var(--muted);">' + interessados.length + ' pessoa(s) interessada(s)</span>' +
             (profile ? ('<button data-action="toggle-interesse" data-id="' + esc(p.id) + '" title="Sua atenção fica registrada para quando o líder avaliar interessados" style="font-size:12px;font-weight:700;border:1.5px solid ' + (interessado ? "#0044FF" : "#dde1ec") + ';background:' + (interessado ? "#e8edff" : "#fff") + ';color:' + (interessado ? "#0044FF" : "#000c33") + ';padding:7px 14px;border-radius:30px;cursor:pointer;">' + (interessado ? "Interesse registrado" : "Tenho interesse") + '</button>') : "") +
           '</div>' +
+          comentariosHtml(p) +
         '</div>';
       }).join("") + '</div>';
     }
@@ -1506,6 +1728,7 @@
     if (action === "submit-form") { handleSubmitForm(el.dataset.flow); return; }
     if (action === "reset-form") { var flow = PROTOCOL_TO_FLOW[el.dataset.flow] || el.dataset.flow; state.enviar.done[flow] = null; render(); return; }
     if (action === "submit-pauta") { handleSubmitPauta(); return; }
+    if (action === "submit-comentario") { handleSubmitComentario(el.dataset.item); return; }
   });
 
   document.addEventListener("change", function (e) {
@@ -1572,6 +1795,32 @@
       return;
     }
     state.pautasUI = { showForm: false, destino: "Toda a empresa", verTodas: state.pautasUI.verTodas, busca: state.pautasUI.busca, enviando: false, erro: null };
+    render();
+  }
+
+  async function handleSubmitComentario(chave) {
+    if (!state.profile || !chave || state.comentUI.enviando[chave]) return;
+    var formId = "form-coment-" + chave;
+    var form = document.getElementById(formId);
+    if (!form) return;
+    var campo = form.querySelector('[data-field="comentario"]');
+    var texto = ((campo && campo.value) || "").trim();
+    if (!texto) { if (campo) campo.focus(); return; }
+
+    // Sem render() antes do resultado: o texto do comentário só existe no DOM.
+    state.comentUI.enviando[chave] = true;
+    limparErroEnvio(formId);
+    setSubmitBusy('#' + formId + ' [data-action="submit-comentario"]', true, "Comentar", "Enviando...");
+
+    var r = await bitrixAddComentario(chave, texto);
+    state.comentUI.enviando[chave] = false;
+
+    if (!r || !r.ok) {
+      setSubmitBusy('#' + formId + ' [data-action="submit-comentario"]', false, "Comentar", "Enviando...");
+      mostrarErroEnvio(formId, r && r.erro);
+      return;
+    }
+    await loadComentarios([chave]);
     render();
   }
 
