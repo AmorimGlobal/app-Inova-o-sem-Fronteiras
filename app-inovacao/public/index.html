@@ -118,6 +118,41 @@
 
   .jump-pill { font-size: 12.5px; font-weight: 700; padding: 8px 14px; border-radius: 30px; cursor: pointer; box-shadow: 0 1px 3px rgba(0,12,51,0.06); }
 
+  /* ---------- coautoria e anexos (bloco opcional dos formulários) ---------- */
+  .extras { border-top: 1.5px dashed var(--border); margin: 4px 0 18px; padding-top: 18px; }
+  .extras-titulo { font-size: 13.5px; font-weight: 800; color: var(--navy); }
+  .extras-titulo .optional { font-weight: 500; color: #8a90a3; font-size: 12.5px; }
+  .extras-sub { font-size: 12.5px; color: var(--muted); margin: 2px 0 16px; }
+  .field .ajuda { font-size: 11.5px; color: var(--muted); margin: -2px 0 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; background: #e8edff; color: var(--blue);
+    font-size: 12px; font-weight: 700; padding: 3px 8px 3px 3px; border-radius: 30px;
+  }
+  .chip button { background: none; border: none; color: inherit; cursor: pointer; font-size: 12px; padding: 0 0 0 2px; line-height: 1; }
+  .mini-avatar {
+    width: 22px; height: 22px; border-radius: 50%; color: #fff; font-size: 9px; font-weight: 800;
+    display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; flex-shrink: 0;
+  }
+  .mini-avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .btn-add {
+    display: inline-flex; align-items: center; gap: 6px; background: #fff; border: 1.5px dashed #c3c9da;
+    color: var(--navy); font-weight: 700; font-size: 12.5px; padding: 6px 14px; border-radius: 30px; cursor: pointer;
+  }
+  .field label.btn-add { display: inline-flex; margin-bottom: 0; color: var(--navy); }
+  .btn-add:hover { border-color: var(--blue); color: var(--blue); }
+  .btn-add:focus-within { outline: 2px solid var(--blue); outline-offset: 2px; }
+  .sr-file { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+  .anexo-lista { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+  .anexo-item {
+    display: flex; align-items: center; gap: 10px; background: var(--ice); border-radius: 8px;
+    padding: 8px 12px; font-size: 12.5px;
+  }
+  .anexo-item .nome { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--navy); }
+  .anexo-item .tam { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
+  .anexo-item button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 13px; padding: 0 2px; }
+  .anexo-aviso { font-size: 11.5px; color: var(--red); margin: 0 0 8px; }
+
   /* ---------- comentários das pautas ---------- */
   .coment-wrap { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--divider); }
   .coment-titulo {
@@ -231,9 +266,9 @@
     rede: { bg: "#e5fff0", fg: "#007a36", accent: "#007a36", label: "Ponte de Negócios" },
   };
   var FIELD_LABELS = {
-    melhoria: { titulo: "Título", processo: "Processo afetado", problema: "Problema atual", solucao: "Solução proposta", beneficio: "Benefício esperado" },
-    novos: { titulo: "Título do projeto", problema: "Problema ou oportunidade", solucao: "Solução proposta", beneficiario: "Quem se beneficia", esforco: "Estimativa de esforço", impacto: "Impacto ou retorno esperado" },
-    rede: { empresa: "Empresa indicada", natureza: "Natureza do contato", autorizacao: "Autorização da empresa" },
+    melhoria: { titulo: "Título", processo: "Processo afetado", problema: "Problema atual", solucao: "Solução proposta", beneficio: "Benefício esperado", observacoes: "Observações" },
+    novos: { titulo: "Título do projeto", problema: "Problema ou oportunidade", solucao: "Solução proposta", beneficiario: "Quem se beneficia", esforco: "Estimativa de esforço", impacto: "Impacto ou retorno esperado", observacoes: "Observações" },
+    rede: { empresa: "Empresa indicada", natureza: "Natureza do contato", autorizacao: "Autorização da empresa", observacoes: "Observações" },
   };
   var PERIODOS = [
     { key: "mensal", label: "Mensal", dias: 30 },
@@ -241,6 +276,10 @@
     { key: "anual", label: "Anual", dias: 365 },
   ];
   var AVATAR_PALETTE = ["#0044FF", "#007a36", "#6a3fc4", "#c05e0f", "#000c33"];
+  // Anexos das ideias sobem em base64 pela API do Bitrix24 — por isso o limite de tamanho.
+  var ANEXO_MAX_ARQUIVOS = 10;
+  var ANEXO_MAX_BYTES = 10 * 1024 * 1024;   // por arquivo
+  var ANEXO_MAX_TOTAL = 25 * 1024 * 1024;   // soma dos arquivos de uma ideia
 
   function isJanela3T() {
     var m = new Date().getMonth() + 1;
@@ -279,6 +318,10 @@
   function firstName(nome) { return (nome || "").split(" ")[0] || ""; }
   // Comentários vêm com quebras de linha; escapa e preserva os parágrafos.
   function escMultilinha(str) { return esc(str).replace(/\r?\n/g, "<br />"); }
+  function tamanhoLegivel(bytes) {
+    if (bytes < 1024 * 1024) return Math.max(1, Math.round(bytes / 1024)) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1).replace(/\.0$/, "").replace(".", ",") + " MB";
+  }
 
   /* ==================================================================================
      CAMADA DE DADOS (DATA STORE)
@@ -439,6 +482,12 @@
       done: { melhoria: null, novos: null, rede: null },
       enviando: { melhoria: false, novos: false, rede: false },
       erro: { melhoria: null, novos: null, rede: null },
+      // Pessoas envolvidas e arquivos não são <input> com valor: ficam aqui até o envio.
+      coautores: { melhoria: [], novos: [], rede: [] },   // [{ id, nome, foto }]
+      anexos: { melhoria: [], novos: [], rede: [] },      // [File]
+      anexoErro: { melhoria: null, novos: null, rede: null },
+      // Ideia criada, mas o comentário com anexos/complemento falhou (sucesso parcial)
+      aviso: { melhoria: null, novos: null, rede: null },
     },
     minhas: { busca: "", statusFiltro: "todos", expandido: null },
     pautasUI: { showForm: false, destino: "Toda a empresa", verTodas: false, busca: "", enviando: false, erro: null },
@@ -455,24 +504,53 @@
     stageNames: [],
   };
 
+  // Mesma pessoa como autora numa ideia e coautora em outra precisa cair na mesma chave.
+  function chavePessoa(email, id, nome) {
+    if (email) return "e:" + String(email).toLowerCase().trim();
+    if (id) return "id:" + id;
+    return "n:" + (nome || "");
+  }
   function getInnovators() {
     var map = {};
-    state.submissions.forEach(function (s) {
-      var key = s.autorEmail || s.autorNome;
-      if (!map[key]) map[key] = { nome: s.autorNome, area: s.autorArea, email: s.autorEmail, foto: s.autorFoto || null, totalIdeias: 0, enviadoEm: s.criadoEm };
-      if (!map[key].foto && s.autorFoto) map[key].foto = s.autorFoto;
+    function contar(key, pessoa, s) {
+      if (!map[key]) map[key] = { nome: pessoa.nome, area: pessoa.area || "", email: pessoa.email || "", foto: pessoa.foto || null, totalIdeias: 0, enviadoEm: s.criadoEm };
+      if (!map[key].foto && pessoa.foto) map[key].foto = pessoa.foto;
       map[key].totalIdeias += 1;
       if (s.criadoEm > map[key].enviadoEm) map[key].enviadoEm = s.criadoEm;
+    }
+    // O autor é identificado pelo e-mail digitado no formulário; o coautor, pelo ID do
+    // Bitrix. keyPorId liga os dois para a mesma pessoa não aparecer duas vezes.
+    var keyPorId = {};
+    state.submissions.forEach(function (s) {
+      var keyAutor = chavePessoa(s.autorEmail, s.autorId, s.autorNome);
+      if (s.autorId && !keyPorId[s.autorId]) keyPorId[s.autorId] = keyAutor;
+      contar(keyAutor, { nome: s.autorNome, area: s.autorArea, email: s.autorEmail, foto: s.autorFoto }, s);
+    });
+    // Coautoria: quem ajudou a construir a ideia também entra no mural.
+    state.submissions.forEach(function (s) {
+      var keyAutor = chavePessoa(s.autorEmail, s.autorId, s.autorNome);
+      (s.coautores || []).forEach(function (c) {
+        var key = (c.id && keyPorId[c.id]) || chavePessoa(c.email, c.id, c.nome);
+        if (key !== keyAutor) contar(key, c, s);
+      });
     });
     return Object.values(map).sort(function (a, b) { return (a.nome || "").localeCompare(b.nome || "", "pt-BR"); });
   }
+  function meuUserId() {
+    return state.perm && state.perm.myUserId ? String(state.perm.myUserId) : null;
+  }
+  function souAutor(s) {
+    var myId = meuUserId();
+    if (myId && s.autorId) return String(s.autorId) === myId;
+    return (s.autorEmail || "").toLowerCase() === ((state.profile && state.profile.email) || "").toLowerCase();
+  }
+  function souCoautor(s) {
+    var myId = meuUserId();
+    return !!myId && (s.coautores || []).some(function (c) { return String(c.id) === myId; });
+  }
   function getMinhasSubmissoes() {
     if (!state.profile) return [];
-    var myId = state.perm && state.perm.myUserId ? String(state.perm.myUserId) : null;
-    return state.submissions.filter(function (s) {
-      if (myId && s.autorId) return String(s.autorId) === myId;
-      return (s.autorEmail || "").toLowerCase() === (state.profile.email || "").toLowerCase();
-    });
+    return state.submissions.filter(function (s) { return souAutor(s) || souCoautor(s); });
   }
   function pautaRelevante(p, area) {
     return p.destino === "Toda a empresa" || (p.area || "").toLowerCase().trim() === (area || "").toLowerCase().trim();
@@ -509,6 +587,15 @@
     // Precisa acompanhar o entityTypeId acima: Processo Inteligente 1046 -> DYNAMIC_1046.
     timelineEntityType: "DYNAMIC_1046",
 
+    // --- COAUTORIA (pessoas envolvidas na ideia) ---
+    // Crie no Processo Inteligente um campo do tipo "Funcionário", MÚLTIPLO, com o nome
+    // exato abaixo: o app acha o campo pelo nome e passa a gravar e ler os coautores
+    // (eles aparecem no Mural e em "Minhas ideias"). Se quiser, fixe o código em f_coautores.
+    // Enquanto o campo não existir, os nomes vão no comentário da timeline do card.
+    f_coautores: "",
+    f_coautores_titulo: "Pessoas envolvidas na ideia",
+    // Os ANEXOS não usam campo: vão como arquivos de um comentário na timeline do card.
+
     // trilha do app -> ID do item na lista "Categoria"
     categoriaEnum: {
       melhoria: "225463", // Melhoria Incremental
@@ -528,9 +615,11 @@
       empresa: "ufCrm13_1784753583031",      // Empresa indicada
       natureza: "ufCrm13_1784753612269",     // Natureza do contato
       autorizacao: "ufCrm13_1784753617001",  // Autorização da empresa
+      observacoes: "",                       // Observações da ideia — ainda não criado (achado pelo nome)
     },
 
     // Reserva: caso um código mude, o app também acha o campo pelo nome.
+    // Resposta sem campo no card (nem pelo código, nem pelo nome) vai no comentário da timeline.
     trackFieldTitles: {
       processo: "Processo afetado",
       problema: "Problema / Oportunidade",
@@ -542,6 +631,7 @@
       empresa: "Empresa indicada",
       natureza: "Natureza do contato",
       autorizacao: "Autorização da empresa",
+      observacoes: "Observações da ideia",   // criar como "Texto" (string), multilinha
     },
   };
 
@@ -550,6 +640,15 @@
 
   function normTitle(t) {
     return String(t || "").trim().toLowerCase().replace(/\s+/g, " ");
+  }
+
+  // Código do campo de uma resposta: o fixado no CONFIG ou, se vazio, o achado pelo nome.
+  function codigoCampo(chave) {
+    return (CONFIG.trackFieldCodes && CONFIG.trackFieldCodes[chave])
+      || FIELD_CODE_BY_TITLE[normTitle(CONFIG.trackFieldTitles[chave] || "")] || "";
+  }
+  function codigoCoautores() {
+    return CONFIG.f_coautores || FIELD_CODE_BY_TITLE[normTitle(CONFIG.f_coautores_titulo)] || "";
   }
 
   // Lê a lista de campos do Processo Inteligente e monta o mapa nome->código.
@@ -686,6 +785,7 @@
           USER_CACHE[String(id)] = {
             nome: [u.NAME, u.LAST_NAME].filter(Boolean).join(" ").trim() || u.EMAIL || "",
             foto: u.PERSONAL_PHOTO || null,
+            email: u.EMAIL || "",
           };
         });
         resolve();
@@ -713,6 +813,10 @@
   function userNome(id) {
     var u = USER_CACHE[String(id || "")];
     return (u && u.nome) || "";
+  }
+  function userEmail(id) {
+    var u = USER_CACHE[String(id || "")];
+    return (u && u.email) || "";
   }
 
   /* ----------------------------------------------------------------------------------
@@ -822,10 +926,19 @@
   function reconstructDados(it) {
     var d = {};
     Object.keys(CONFIG.trackFieldCodes).forEach(function (key) {
-      var v = it[CONFIG.trackFieldCodes[key]];
+      var codigo = codigoCampo(key);
+      var v = codigo ? it[codigo] : undefined;
       if (v !== undefined && v !== null && String(v).trim() !== "") d[key] = v;
     });
     return d;
+  }
+
+  // IDs dos coautores gravados no card (campo Funcionário múltiplo; vazio se não existir).
+  function idsCoautoresDoCard(it) {
+    var codigo = codigoCoautores();
+    var v = codigo ? it[codigo] : null;
+    if (v === undefined || v === null || v === false || v === "") return [];
+    return (Array.isArray(v) ? v : [v]).map(String).filter(function (id) { return id && id !== "0"; });
   }
 
   function mapItemToSubmission(it) {
@@ -841,6 +954,8 @@
       criadoEm: (it.createdTime || "").slice(0, 10),
       status: STAGE_MAP[it.stageId] || "Recebida",
       dados: reconstructDados(it),
+      // nome, foto e e-mail são preenchidos em bitrixLoadAll, depois do loadUsers
+      coautores: idsCoautoresDoCard(it).map(function (id) { return { id: id, nome: "", foto: null, email: "" }; }),
     };
   }
 
@@ -872,10 +987,16 @@
     // Nome e foto reais de quem criou (crm.item.list só traz o ID)
     var autores = [];
     subs.concat(pts).forEach(function (r) { if (r.autorId) autores.push(r.autorId); });
+    subs.forEach(function (s) { s.coautores.forEach(function (c) { autores.push(c.id); }); });
     await loadUsers(autores);
     subs.forEach(function (s) {
       s.autorFoto = userFoto(s.autorId);
       if (!s.autorNome) s.autorNome = userNome(s.autorId);
+      s.coautores.forEach(function (c) {
+        c.nome = userNome(c.id) || ("ID " + c.id);
+        c.foto = userFoto(c.id);
+        c.email = userEmail(c.id);
+      });
     });
 
     state.submissions = subs; MEMORIA.submissoes = subs;
@@ -903,50 +1024,97 @@
     return linhas.join("\n");
   }
 
+  // callMethod em forma de Promise: resolve { ok: true, data } ou { ok: false, erro }.
+  function bitrixChamar(metodo, params) {
+    return new Promise(function (resolve) {
+      window.BX24.callMethod(metodo, params, function (res) {
+        if (res.error()) {
+          console.error("Erro " + metodo + ":", res.error());
+          resolve({ ok: false, erro: bitrixErroTexto(res.error()) });
+        } else {
+          resolve({ ok: true, data: res.data() });
+        }
+      });
+    });
+  }
+
+  // Conteúdo do arquivo em base64 (sem o prefixo "data:...;base64,"), formato da API do Bitrix.
+  function lerBase64(arquivo) {
+    return new Promise(function (resolve, reject) {
+      var leitor = new FileReader();
+      leitor.onload = function () { resolve(String(leitor.result).split(",")[1] || ""); };
+      leitor.onerror = function () { reject(leitor.error || new Error("falha ao ler " + arquivo.name)); };
+      leitor.readAsDataURL(arquivo);
+    });
+  }
+
   // Cria o card no Bitrix. Fora do Bitrix (teste no navegador) cai para memória.
   // Resolve { ok: true } ou { ok: false, erro: "<texto do Bitrix>" } — quem chama
   // PRECISA olhar esse retorno; antes o erro era engolido e a tela dizia "enviada!".
-  function bitrixCreateCard(record) {
-    return new Promise(function (resolve) {
-      if (!window.BX24) {
-        console.warn("Fora do Bitrix — card não criado (modo teste).");
-        resolve({ ok: true, memoria: true });
-        return;
-      }
-      var fields = {};
-      fields.title = record.titulo || ("Sugestão " + record.protocol);
-      fields.categoryId = CONFIG.categoryId;
-      fields[CONFIG.f_email] = (record.dados && record.dados.email) || record.autorEmail || "";
-      fields[CONFIG.f_solicitante] = record.autorNome || "";
-      fields[CONFIG.f_categoria] = CONFIG.categoriaEnum[record.linha] || "";
-      // Motivo (longo) não é mais preenchido — cada resposta vai no seu campo próprio.
+  // Com anexos ou respostas sem campo próprio, cria também um comentário na timeline
+  // do card; se só essa parte falhar, resolve { ok: true, aviso: "<erro>" } — a ideia
+  // já existe no funil, então reenviar duplicaria o card.
+  async function bitrixCreateCard(record) {
+    if (!window.BX24) {
+      console.warn("Fora do Bitrix — card não criado (modo teste).");
+      return { ok: true, memoria: true };
+    }
+    var fields = {};
+    fields.title = record.titulo || ("Sugestão " + record.protocol);
+    fields.categoryId = CONFIG.categoryId;
+    fields[CONFIG.f_email] = (record.dados && record.dados.email) || record.autorEmail || "";
+    fields[CONFIG.f_solicitante] = record.autorNome || "";
+    fields[CONFIG.f_categoria] = CONFIG.categoriaEnum[record.linha] || "";
+    // Motivo (longo) não é mais preenchido — cada resposta vai no seu campo próprio.
 
-      // Cada resposta do formulário no seu campo próprio (achado pelo nome).
-      // Se um campo não existir no card, a resposta continua salva no "Motivo".
-      var dados = record.dados || {};
-      Object.keys(dados).forEach(function (chave) {
-        if (chave === "email") return; // já vai no campo E-mail
-        var codigo = (CONFIG.trackFieldCodes && CONFIG.trackFieldCodes[chave])
-          || FIELD_CODE_BY_TITLE[normTitle(CONFIG.trackFieldTitles[chave] || "")];
-        var valor = dados[chave];
-        if (codigo && valor !== undefined && valor !== null && String(valor).trim() !== "") {
-          fields[codigo] = valor;
-        }
-      });
-
-      window.BX24.callMethod(
-        "crm.item.add",
-        { entityTypeId: CONFIG.entityTypeId, fields: fields },
-        function (res) {
-          if (res.error()) {
-            console.error("Erro ao criar card (crm.item.add):", res.error());
-            resolve({ ok: false, erro: bitrixErroTexto(res.error()) });
-          } else {
-            resolve({ ok: true });
-          }
-        }
-      );
+    // Cada resposta do formulário no seu campo próprio (pelo código ou achado pelo nome).
+    // Se um campo não existir no card, a resposta vai no comentário da timeline.
+    var labels = FIELD_LABELS[record.linha] || {};
+    var semCampo = [];
+    var dados = record.dados || {};
+    Object.keys(dados).forEach(function (chave) {
+      if (chave === "email" || chave === "titulo") return; // já vão no E-mail e no nome do card
+      var valor = dados[chave];
+      if (valor === undefined || valor === null || String(valor).trim() === "") return;
+      var codigo = codigoCampo(chave);
+      if (codigo) fields[codigo] = valor;
+      else semCampo.push((labels[chave] || chave) + ":\n" + valor);
     });
+
+    var coautores = record.coautores || [];
+    var codCoautores = codigoCoautores();
+    if (coautores.length && codCoautores) {
+      fields[codCoautores] = coautores.map(function (c) { return Number(c.id); }).filter(Boolean);
+    } else if (coautores.length) {
+      semCampo.unshift("Pessoas envolvidas na ideia: " + coautores.map(function (c) { return c.nome; }).join(", "));
+    }
+
+    // Lê os arquivos ANTES de criar o card: se algum não puder ser lido, nada é salvo
+    // e a pessoa pode remover o arquivo e tentar de novo.
+    var arquivos = [];
+    var anexos = record.anexos || [];
+    for (var i = 0; i < anexos.length; i++) {
+      try {
+        arquivos.push([anexos[i].name, await lerBase64(anexos[i])]);
+      } catch (e) {
+        return { ok: false, erro: "não foi possível ler o arquivo \"" + anexos[i].name + "\" — remova e anexe de novo" };
+      }
+    }
+
+    var criado = await bitrixChamar("crm.item.add", { entityTypeId: CONFIG.entityTypeId, fields: fields });
+    if (!criado.ok) return { ok: false, erro: criado.erro };
+    if (!semCampo.length && !arquivos.length) return { ok: true };
+
+    var itemId = criado.data && criado.data.item && criado.data.item.id;
+    if (!itemId) return { ok: true, aviso: "o Bitrix24 não devolveu o ID do card criado" };
+
+    var linhas = ["Complemento enviado pelo app Inovação sem Fronteiras (protocolo " + record.protocol + ")"];
+    if (semCampo.length) linhas.push("", semCampo.join("\n\n"));
+    if (arquivos.length) linhas.push("", "Anexos: " + arquivos.length + " arquivo(s).");
+    var comentario = { ENTITY_ID: Number(itemId), ENTITY_TYPE: CONFIG.timelineEntityType, COMMENT: linhas.join("\n") };
+    if (arquivos.length) comentario.FILES = arquivos;
+    var comentado = await bitrixChamar("crm.timeline.comment.add", { fields: comentario });
+    return comentado.ok ? { ok: true } : { ok: true, aviso: comentado.erro };
   }
 
   async function addSubmission(record) {
@@ -1007,7 +1175,18 @@
       if (el.type === "radio") { if (el.checked) dirty = true; }
       else if ((el.value || "").trim() !== "") dirty = true;
     });
+    // Pessoas envolvidas e anexos não ficam em <input> com valor — estão em state.enviar.
+    if (state.tab === "enviar") Object.keys(FLOW_LABELS).forEach(function (f) {
+      if (state.enviar.coautores[f].length || state.enviar.anexos[f].length) dirty = true;
+    });
     return dirty;
+  }
+  function limparExtras(flow) {
+    (flow ? [flow] : Object.keys(FLOW_LABELS)).forEach(function (f) {
+      state.enviar.coautores[f] = [];
+      state.enviar.anexos[f] = [];
+      state.enviar.anexoErro[f] = null;
+    });
   }
   function guardedSetTab(next) {
     if (next === state.tab) return;
@@ -1015,6 +1194,8 @@
       var ok = window.confirm("Você tem uma ideia em andamento que ainda não foi enviada. Sair mesmo assim e descartar o que digitou?");
       if (!ok) return;
     }
+    // O texto digitado some com o render(); pessoas e anexos também precisam sumir.
+    if (state.tab === "enviar") limparExtras();
     state.tab = next;
     render();
   }
@@ -1260,21 +1441,128 @@
   var REQ_NOVOS = ["titulo", "problema", "solucao", "beneficiario", "esforco", "impacto", "email"];
   var REQ_REDE = ["empresa", "natureza", "autorizacao", "email"];
 
-  function confirmHtml(protocol, texto) {
+  function confirmHtml(protocol, texto, aviso) {
+    // aviso: a ideia foi criada, mas o comentário com anexos/complemento falhou
+    var avisoHtml = aviso ? (
+      '<div class="erro-box" style="text-align:left;max-width:520px;margin:0 auto 20px;">' +
+        '<b>A ideia foi registrada, mas os anexos e o complemento não chegaram ao card.</b> ' +
+        'Não envie de novo (o card duplicaria): mande os arquivos diretamente para a liderança da área ' +
+        'e mostre esta mensagem ao time de TI: <code>' + esc(aviso) + '</code>' +
+      '</div>'
+    ) : "";
     return '<div class="confirm">' +
       '<div class="check-circle"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00a851" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg></div>' +
       '<div class="titulo">Ideia enviada!</div>' +
       '<div class="protocolo">Protocolo: ' + esc(protocol) + '</div>' +
       '<div class="texto">' + esc(texto) + '</div>' +
+      avisoHtml +
       '<button class="btn-ghost" data-action="reset-form" data-flow="' + protocol.slice(0, 2).toLowerCase() + '">Nova ideia</button>' +
     '</div>';
   }
   // mapeia protocolo -> flow para o botão "nova ideia" (MI/NH/RV)
   var PROTOCOL_TO_FLOW = { mi: "melhoria", nh: "novos", rv: "rede" };
 
+  /* ----------------------------------------------------------------------------------
+     COAUTORIA, OBSERVAÇÕES E ANEXOS — bloco opcional comum aos 3 formulários
+     ----------------------------------------------------------------------------------
+     Pessoas e arquivos ficam em state.enviar (um <input type=file> não pode ser
+     reconstruído). Ao mudar, só o pedaço da lista é redesenhado (atualizarCoautores /
+     atualizarAnexos): um render() apagaria o que a pessoa já digitou no formulário.
+     ---------------------------------------------------------------------------------- */
+  function miniAvatarHtml(nome, foto) {
+    var img = foto ? '<img src="' + esc(foto) + '" alt="" onerror="this.remove()" />' : "";
+    return '<span class="mini-avatar" style="background:' + avatarColor(nome) + ';">' + esc(initials(nome)) + img + '</span>';
+  }
+
+  function coautoresInnerHtml(flow) {
+    return (state.enviar.coautores[flow] || []).map(function (c, i) {
+      return '<span class="chip">' + miniAvatarHtml(c.nome, c.foto) + esc(c.nome) +
+        '<button type="button" data-action="coautor-remove" data-flow="' + flow + '" data-index="' + i + '" aria-label="Remover ' + esc(c.nome) + '">✕</button>' +
+      '</span>';
+    }).join("") +
+    '<button type="button" class="btn-add" data-action="coautor-add" data-flow="' + flow + '">+ Adicionar pessoas</button>';
+  }
+
+  function anexosInnerHtml(flow) {
+    var lista = state.enviar.anexos[flow] || [];
+    var erro = state.enviar.anexoErro[flow];
+    return (lista.length ? '<div class="anexo-lista">' + lista.map(function (f, i) {
+        return '<div class="anexo-item">' +
+          '<span aria-hidden="true">' + (/^image\//.test(f.type) ? "🖼️" : "📄") + '</span>' +
+          '<span class="nome" title="' + esc(f.name) + '">' + esc(f.name) + '</span>' +
+          '<span class="tam">' + tamanhoLegivel(f.size) + '</span>' +
+          '<button type="button" data-action="anexo-remove" data-flow="' + flow + '" data-index="' + i + '" aria-label="Remover ' + esc(f.name) + '">✕</button>' +
+        '</div>';
+      }).join("") + '</div>' : "") +
+      (erro ? '<div class="anexo-aviso">' + esc(erro) + '</div>' : "");
+  }
+
+  function extrasHtml(flow) {
+    return '<div class="extras">' +
+      '<div class="extras-titulo">Complementar a ideia <span class="optional">(opcional)</span></div>' +
+      '<div class="extras-sub">Reconheça quem construiu a ideia com você e acrescente detalhes, fotos ou arquivos.</div>' +
+      '<div class="field"><label>Pessoas envolvidas na ideia</label>' +
+        '<div class="ajuda">Colegas que participaram da construção da ideia. Eles também aparecem no Mural dos Inovadores.</div>' +
+        '<div class="chips" id="coautores-' + flow + '">' + coautoresInnerHtml(flow) + '</div>' +
+      '</div>' +
+      fieldHtml(flow + "-observacoes", "Observações", { form: flow, field: "observacoes", type: "textarea", placeholder: "Conte como a ideia surgiu, como cada pessoa participou ou acrescente detalhes que ajudem na avaliação" }) +
+      '<div class="field"><label>Anexos</label>' +
+        '<div class="ajuda">Fotos, PDFs, planilhas ou apresentações · até ' + ANEXO_MAX_ARQUIVOS + ' arquivos de ' + tamanhoLegivel(ANEXO_MAX_BYTES) + ' cada.</div>' +
+        '<div id="anexos-' + flow + '">' + anexosInnerHtml(flow) + '</div>' +
+        '<label class="btn-add"><input type="file" multiple class="sr-file" data-action="anexo-input" data-flow="' + flow + '" />📎 Anexar arquivos</label>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function atualizarCoautores(flow) {
+    var box = document.getElementById("coautores-" + flow);
+    if (box) box.innerHTML = coautoresInnerHtml(flow);
+  }
+  function atualizarAnexos(flow) {
+    var box = document.getElementById("anexos-" + flow);
+    if (box) box.innerHTML = anexosInnerHtml(flow);
+  }
+
+  function adicionarCoautores(flow) {
+    var lista = state.enviar.coautores[flow];
+    function incluir(id, nome, foto) {
+      id = id ? String(id) : "";
+      if (!nome || (id && id === meuUserId())) return; // quem envia já é a autora/o autor
+      var repetido = lista.some(function (c) { return id ? c.id === id : c.nome === nome; });
+      if (!repetido) lista.push({ id: id, nome: nome, foto: foto || null });
+    }
+    if (window.BX24 && window.BX24.selectUsers) {
+      window.BX24.selectUsers(function (users) {
+        (users || []).forEach(function (u) { incluir(u.id, u.name || u.sub || ("ID " + u.id), u.photo); });
+        atualizarCoautores(flow);
+      });
+      return;
+    }
+    // Fora do Bitrix (teste no navegador) não há seletor de usuários: digita o nome.
+    incluir("", (window.prompt("Nome da pessoa envolvida na ideia:") || "").trim(), null);
+    atualizarCoautores(flow);
+  }
+
+  function adicionarAnexos(flow, input) {
+    var lista = state.enviar.anexos[flow];
+    var recusados = [];
+    Array.prototype.forEach.call(input.files || [], function (f) {
+      var total = lista.reduce(function (soma, a) { return soma + a.size; }, 0);
+      if (lista.some(function (a) { return a.name === f.name && a.size === f.size; })) return;
+      if (lista.length >= ANEXO_MAX_ARQUIVOS) recusados.push(f.name + " (limite de " + ANEXO_MAX_ARQUIVOS + " arquivos)");
+      else if (f.size === 0) recusados.push(f.name + " (arquivo vazio)");
+      else if (f.size > ANEXO_MAX_BYTES) recusados.push(f.name + " (maior que " + tamanhoLegivel(ANEXO_MAX_BYTES) + ")");
+      else if (total + f.size > ANEXO_MAX_TOTAL) recusados.push(f.name + " (passaria de " + tamanhoLegivel(ANEXO_MAX_TOTAL) + " no total)");
+      else lista.push(f);
+    });
+    input.value = ""; // permite escolher de novo um arquivo removido
+    state.enviar.anexoErro[flow] = recusados.length ? "Não incluídos: " + recusados.join("; ") + "." : null;
+    atualizarAnexos(flow);
+  }
+
   function renderFormMelhoria() {
     var flowState = state.enviar;
-    if (flowState.done.melhoria) return confirmHtml(flowState.done.melhoria, "Obrigado por contribuir! Sua ideia foi registrada e segue para a liderança da sua área. Você recebe retorno em até 7 dias úteis.");
+    if (flowState.done.melhoria) return confirmHtml(flowState.done.melhoria, "Obrigado por contribuir! Sua ideia foi registrada e segue para a liderança da sua área. Você recebe retorno em até 7 dias úteis.", flowState.aviso.melhoria);
     var enviando = flowState.enviando.melhoria;
     return '<div class="card" data-track-dirty style="border-left:4px solid ' + LINE_STYLE.melhoria.accent + ';" id="form-melhoria">' +
       '<div class="progress-wrap"><div class="progress-label"><span data-progress-label>0 de 6 campos preenchidos</span><span>0%</span></div><div class="progress-track"><div class="progress-fill" data-progress-fill style="width:0%"></div></div></div>' +
@@ -1283,6 +1571,7 @@
       fieldHtml("melhoria-problema", "Qual o problema ou situação atual?", { form: "melhoria", field: "problema", type: "textarea", placeholder: "Descreva o que hoje não funciona bem ou poderia ser mais eficiente" }) +
       fieldHtml("melhoria-solucao", "Qual a solução proposta?", { form: "melhoria", field: "solucao", type: "textarea", placeholder: "Descreva a melhoria que você sugere" }) +
       fieldHtml("melhoria-beneficio", "Benefício esperado", { form: "melhoria", field: "beneficio", type: "textarea", placeholder: "Ex: redução de tempo, menos retrabalho, menor risco de erro" }) +
+      extrasHtml("melhoria") +
       fieldHtml("melhoria-email", "E-mail para contato", { form: "melhoria", field: "email", placeholder: "seu.email@amorimglobal.com.br", value: (state.profile && state.profile.email) || "" }) +
       '<button class="btn-primary" data-action="submit-form" data-flow="melhoria"' + (enviando ? " disabled" : "") + '>' + (enviando ? "Enviando..." : "Enviar ideia") + '</button>' +
       erroEnvioBoxHtml("melhoria") +
@@ -1292,7 +1581,7 @@
   function renderFormNovos() {
     var janela = isJanela3T();
     var flowState = state.enviar;
-    if (flowState.done.novos) return confirmHtml(flowState.done.novos, "Obrigado por participar! Sua ideia foi registrada para avaliação na Janela de Inovação do 3º Trimestre. Resultado no 4º Trimestre.");
+    if (flowState.done.novos) return confirmHtml(flowState.done.novos, "Obrigado por participar! Sua ideia foi registrada para avaliação na Janela de Inovação do 3º Trimestre. Resultado no 4º Trimestre.", flowState.aviso.novos);
     if (!janela) {
       return '<div class="card" style="border-left:4px solid ' + LINE_STYLE.novos.accent + ';">' +
         '<div style="text-align:center;padding:20px 10px;">' +
@@ -1310,6 +1599,7 @@
       fieldHtml("novos-beneficiario", "Quem se beneficia?", { form: "novos", field: "beneficiario", type: "select", options: ["Cliente externo", "Cliente interno (equipe Amorim)", "Ambos"] }) +
       fieldHtml("novos-esforco", "Estimativa de esforço", { form: "novos", field: "esforco", type: "select", options: ["Baixo — poucas semanas, poucos recursos", "Médio — 1 a 3 meses, recursos moderados", "Alto — mais de 3 meses, recursos dedicados"] }) +
       fieldHtml("novos-impacto", "Estimativa de impacto ou retorno esperado", { form: "novos", field: "impacto", type: "textarea", placeholder: "Estime economia, nova receita ou impacto estratégico" }) +
+      extrasHtml("novos") +
       fieldHtml("novos-email", "E-mail para contato", { form: "novos", field: "email", placeholder: "seu.email@amorimglobal.com.br", value: (state.profile && state.profile.email) || "" }) +
       '<button class="btn-primary" data-action="submit-form" data-flow="novos"' + (enviando ? " disabled" : "") + '>' + (enviando ? "Enviando..." : "Enviar projeto") + '</button>' +
       erroEnvioBoxHtml("novos") +
@@ -1318,13 +1608,14 @@
 
   function renderFormRede() {
     var flowState = state.enviar;
-    if (flowState.done.rede) return confirmHtml(flowState.done.rede, "Obrigado pela indicação! Nossa equipe vai analisar o contato, e a indicação fica válida por até 12 meses a partir do envio.");
+    if (flowState.done.rede) return confirmHtml(flowState.done.rede, "Obrigado pela indicação! Nossa equipe vai analisar o contato, e a indicação fica válida por até 12 meses a partir do envio.", flowState.aviso.rede);
     var enviando = flowState.enviando.rede;
     return '<div class="card" data-track-dirty style="border-left:4px solid ' + LINE_STYLE.rede.accent + ';" id="form-rede">' +
       '<div class="progress-wrap"><div class="progress-label"><span data-progress-label>0 de 4 campos preenchidos</span><span>0%</span></div><div class="progress-track"><div class="progress-fill" data-progress-fill style="width:0%"></div></div></div>' +
       fieldHtml("rede-empresa", "Empresa indicada", { form: "rede", field: "empresa", placeholder: "Nome da empresa" }) +
       fieldHtml("rede-natureza", "Natureza do contato", { form: "rede", field: "natureza", type: "textarea", placeholder: "Como você conhece essa empresa e por que ela pode gerar valor comercial para a Amorim" }) +
       fieldHtml("rede-autorizacao", "A empresa indicada autoriza este contato?", { form: "rede", field: "autorizacao", type: "choice", options: [{ value: "Sim", label: "Sim, já confirmei com a empresa" }, { value: "Não", label: "Ainda não confirmei" }] }) +
+      extrasHtml("rede") +
       fieldHtml("rede-email", "E-mail para contato", { form: "rede", field: "email", placeholder: "seu.email@amorimglobal.com.br", value: (state.profile && state.profile.email) || "" }) +
       '<button class="btn-primary" data-action="submit-form" data-flow="rede"' + (enviando ? " disabled" : "") + '>' + (enviando ? "Enviando..." : "Enviar indicação") + '</button>' +
       erroEnvioBoxHtml("rede") +
@@ -1394,10 +1685,22 @@
       cardsHtml = '<div style="display:flex;flex-direction:column;gap:12px;">' + filtradas.map(function (s) {
         var aberto = state.minhas.expandido === s.protocol;
         var labels = FIELD_LABELS[s.linha] || {};
+        var coautoria = !souAutor(s);   // está na lista por ser coautor(a)
+        var rotuloHtml = function (texto) {
+          return '<div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">' + esc(texto) + '</div>';
+        };
+        var envolvidos = s.coautores || [];
+        var envolvidosHtml = (coautoria || envolvidos.length) ? (
+          '<div>' + rotuloHtml("Pessoas envolvidas") + '<div class="chips">' +
+            '<span class="chip">' + miniAvatarHtml(s.autorNome, s.autorFoto) + esc(s.autorNome || "Autor(a)") + ' · autoria</span>' +
+            envolvidos.map(function (c) { return '<span class="chip">' + miniAvatarHtml(c.nome, c.foto) + esc(c.nome) + '</span>'; }).join("") +
+          '</div></div>'
+        ) : "";
         var detalhes = aberto ? (
           '<div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--divider);display:flex;flex-direction:column;gap:12px;">' +
+            envolvidosHtml +
             Object.keys(s.dados || {}).map(function (key) {
-              return '<div><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px;">' + esc(labels[key] || key) + '</div><div style="font-size:13px;color:var(--ink);">' + esc(s.dados[key] || "—") + '</div></div>';
+              return '<div>' + rotuloHtml(labels[key] || key) + '<div style="font-size:13px;color:var(--ink);white-space:pre-line;">' + esc(s.dados[key] || "—") + '</div></div>';
             }).join("") +
           '</div>'
         ) : "";
@@ -1408,7 +1711,11 @@
               '<span class="tag" style="background:' + statusStyle(s.status).bg + ';color:' + statusStyle(s.status).fg + ';">' + esc(s.status) + '</span>' +
             '</div>' +
             '<div style="display:flex;justify-content:space-between;align-items:center;">' +
-              '<span class="tag" style="background:' + LINE_STYLE[s.linha].bg + ';color:' + LINE_STYLE[s.linha].fg + ';">' + LINE_STYLE[s.linha].label + '</span>' +
+              '<span style="display:flex;gap:6px;flex-wrap:wrap;">' +
+                '<span class="tag" style="background:' + LINE_STYLE[s.linha].bg + ';color:' + LINE_STYLE[s.linha].fg + ';">' + LINE_STYLE[s.linha].label + '</span>' +
+                (coautoria ? '<span class="tag" style="background:#f1ecfb;color:#6a3fc4;" title="Enviada por ' + esc(s.autorNome) + '">Coautoria</span>' : '') +
+                (envolvidos.length ? '<span class="tag" style="background:var(--surface);color:var(--navy);">👥 ' + (envolvidos.length + 1) + ' pessoas</span>' : '') +
+              '</span>' +
               '<span style="display:flex;align-items:center;gap:4px;font-size:11.5px;font-weight:700;color:var(--blue);">' + (aberto ? "Ocultar detalhes" : "Ver detalhes") + '</span>' +
             '</div>' +
           '</div>' + detalhes +
@@ -1418,7 +1725,7 @@
 
     return loadErrorBannerHtml() +
       '<div style="font-size:22px;font-weight:800;letter-spacing:-.01em;color:var(--navy);margin-bottom:4px;">Minhas ideias</div>' +
-      '<div class="page-sub" style="margin-bottom:22px;">' + list.length + ' ideia(s) registrada(s) por você.</div>' +
+      '<div class="page-sub" style="margin-bottom:22px;">' + list.length + ' ideia(s) registrada(s) por você ou com a sua participação.</div>' +
       filtros + cardsHtml;
   }
 
@@ -1664,6 +1971,8 @@
       protocol: protocol, linha: flow, titulo: titulo,
       autorNome: state.profile.nome, autorArea: state.profile.area, autorEmail: state.profile.email, autorFoto: state.profile.foto || null,
       criadoEm: todayISO(), status: "Em análise", dados: data,
+      coautores: state.enviar.coautores[flow].slice(),
+      anexos: state.enviar.anexos[flow].slice(),
     });
     state.enviar.enviando[flow] = false;
 
@@ -1675,6 +1984,8 @@
       return;
     }
     state.enviar.done[flow] = protocol;
+    state.enviar.aviso[flow] = r.aviso || null;
+    limparExtras(flow);
     render();
   }
 
@@ -1726,7 +2037,17 @@
     }
     if (action === "pautas-ver-todas") { state.pautasUI.verTodas = !state.pautasUI.verTodas; render(); return; }
     if (action === "submit-form") { handleSubmitForm(el.dataset.flow); return; }
-    if (action === "reset-form") { var flow = PROTOCOL_TO_FLOW[el.dataset.flow] || el.dataset.flow; state.enviar.done[flow] = null; render(); return; }
+    if (action === "reset-form") { var flow = PROTOCOL_TO_FLOW[el.dataset.flow] || el.dataset.flow; state.enviar.done[flow] = null; state.enviar.aviso[flow] = null; render(); return; }
+    if (action === "coautor-add") { adicionarCoautores(el.dataset.flow); return; }
+    if (action === "coautor-remove") {
+      state.enviar.coautores[el.dataset.flow].splice(Number(el.dataset.index), 1);
+      atualizarCoautores(el.dataset.flow); return;
+    }
+    if (action === "anexo-remove") {
+      state.enviar.anexos[el.dataset.flow].splice(Number(el.dataset.index), 1);
+      state.enviar.anexoErro[el.dataset.flow] = null;
+      atualizarAnexos(el.dataset.flow); return;
+    }
     if (action === "submit-pauta") { handleSubmitPauta(); return; }
     if (action === "submit-comentario") { handleSubmitComentario(el.dataset.item); return; }
   });
@@ -1734,6 +2055,7 @@
   document.addEventListener("change", function (e) {
     if (e.target.dataset.action === "mural-setor") { state.mural.setor = e.target.value; render(); }
     if (e.target.dataset.action === "minhas-status") { state.minhas.statusFiltro = e.target.value; render(); }
+    if (e.target.dataset.action === "anexo-input") { adicionarAnexos(e.target.dataset.flow, e.target); }
     if (e.target.dataset.action === "pauta-destino") {
       state.pautasUI.destino = e.target.value;
       var wrap = document.getElementById("pauta-area-wrap");
